@@ -5,7 +5,13 @@
 */
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { authAPI, clearAccessToken, setAccessToken } from '../services/api';
+import {
+  authAPI,
+  clearAccessToken,
+  clearRefreshToken,
+  setAccessToken,
+  setRefreshToken,
+} from '../services/api';
 import {
   getExtensionRoles,
   hasAllPermissions,
@@ -36,6 +42,7 @@ export function AuthProvider({ children }) {
     } catch (fetchError) {
       if (fetchError?.status === 401) {
         clearAccessToken();
+        clearRefreshToken();
       }
       setUser(null);
       setRequiresPasswordChange(false);
@@ -66,8 +73,12 @@ export function AuthProvider({ children }) {
     setError(null);
     const data = await authAPI.login(email, password);
     const accessToken = data?.data?.accessToken || data?.accessToken;
+    const refreshToken = data?.data?.refreshToken || data?.refreshToken;
     if (accessToken) {
       setAccessToken(accessToken);
+    }
+    if (refreshToken) {
+      setRefreshToken(refreshToken);
     }
 
     const loggedUser = data.data?.user ?? data.user;
@@ -100,6 +111,7 @@ export function AuthProvider({ children }) {
       /* best-effort */
     }
     clearAccessToken();
+    clearRefreshToken();
     setUser(null);
     setRequiresPasswordChange(false);
   };

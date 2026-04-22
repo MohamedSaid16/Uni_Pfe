@@ -3,8 +3,6 @@ import prisma from "../../config/database";
 import logger from "../../utils/logger";
 import {
   createAlert,
-  getUserAlerts,
-  markAsRead,
 } from "./alert.service";
 
 export { createAlert, getUserAlerts, markAsRead } from "./alert.service";
@@ -148,7 +146,10 @@ export const createDocumentRequestStatusAlert = async (
     throw new Error(`Document request ${documentRequestId} not found`);
   }
 
-  if (![StatusDocumentRequest.valide, StatusDocumentRequest.refuse].includes(request.status)) {
+  if (
+    request.status !== StatusDocumentRequest.valide &&
+    request.status !== StatusDocumentRequest.refuse
+  ) {
     return null;
   }
 

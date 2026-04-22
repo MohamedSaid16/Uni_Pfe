@@ -1,6 +1,170 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import request, { resolveMediaUrl } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import univLogo from '../assets/images/ibnKhaldoun.jpg';
+
+// ─────────────────────────────────────────────────────────────
+// PDF generation (html2canvas + jsPDF, loaded on demand from CDN)
+// ─────────────────────────────────────────────────────────────
+const PDF_LIBS = {
+  jspdf: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+  html2canvas: 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+};
+
+const loadScript = (src) =>
+  new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+    const el = document.createElement('script');
+    el.src = src;
+    el.onload = resolve;
+    el.onerror = () => reject(new Error(`Failed to load ${src}`));
+    document.head.appendChild(el);
+  });
+
+const ensurePdfLibs = async () => {
+  if (!window.jspdf) await loadScript(PDF_LIBS.jspdf);
+  if (!window.html2canvas) await loadScript(PDF_LIBS.html2canvas);
+};
+
+const buildReferenceCode = (requestId, documentName) => {
+  const prefix = String(documentName || 'DOC')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || 'DOC';
+  const year = new Date().getFullYear();
+  return `${prefix}/${year}/${String(requestId).padStart(4, '0')}`;
+};
+
+const buildDocumentBody = (formData, documentName) => {
+  const fullName = `${formData.prenom || ''} ${formData.nom || ''}`.trim() || '___________________';
+  const grade = formData.grade || '___________________';
+  const dept = formData.departement || 'Informatique';
+  const year = `${new Date().getFullYear() - 1}/${new Date().getFullYear()}`;
+  const observations = formData.observations
+    ? `<p style="margin-top:12px;font-style:italic;color:#555;">Observations : ${formData.observations}</p>`
+    : '';
+  const docLower = String(documentName || '').toLowerCase();
+
+  if (docLower.includes('salaire')) {
+    return `
+      <p style="margin-bottom:14px;">Le Doyen atteste que :</p>
+      <p style="margin-bottom:14px;padding-left:24px;">
+        <strong>${fullName}</strong>, de grade <strong>${grade}</strong>, affecté(e) au département <strong>${dept}</strong>,
+        perçoit un salaire au titre de l'année universitaire <strong>${year}</strong>.
+      </p>
+      ${observations}
+      <p>Cette attestation est délivrée à l'intéressé(e) à sa demande pour servir et valoir ce que de droit.</p>`;
+  }
+  if (docLower.includes('scolarit') || docLower.includes('certificat')) {
+    return `
+      <p style="margin-bottom:14px;">Le Doyen certifie que :</p>
+      <p style="margin-bottom:14px;padding-left:24px;">
+        <strong>${fullName}</strong>, du département <strong>${dept}</strong>,
+        est régulièrement inscrit(e) au titre de l'année universitaire <strong>${year}</strong>.
+      </p>
+      ${observations}
+      <p>Ce certificat est délivré à l'intéressé(e) à sa demande pour servir et valoir ce que de droit.</p>`;
+  }
+  if (docLower.includes('mission')) {
+    return `
+      <p style="margin-bottom:14px;">Il est ordonné à :</p>
+      <p style="margin-bottom:14px;padding-left:24px;">
+        <strong>${fullName}</strong>, <strong>${grade}</strong>, du département <strong>${dept}</strong>,
+        d'effectuer une mission officielle au titre de l'année universitaire <strong>${year}</strong>.
+      </p>
+      ${observations}
+      <p>Fait à Tiaret, pour servir et valoir ce que de droit.</p>`;
+  }
+  return `
+    <p style="margin-bottom:14px;">Le Doyen de la Faculté des Mathématiques et de l'Informatique de l'Université Ibn Khaldoun de Tiaret atteste que :</p>
+    <p style="margin-bottom:14px;padding-left:24px;">
+      <strong>${fullName}</strong>, de grade <strong>${grade}</strong>,
+      département <strong>${dept}</strong>,
+      est bien enseignant(e) au sein de notre département durant l'année universitaire <strong>${year}</strong>.
+    </p>
+    ${observations}
+    <p>Cette attestation lui est délivrée à sa demande et pour servir et valoir ce que de droit.</p>
+    <p style="font-size:10px;color:#666;font-style:italic;margin-top:12px;">* Cette attestation n'est valable que pour l'année universitaire en cours.</p>`;
+};
+
+const buildOfficialHTML = ({ title, bodyHTML, requestId, ref, logoUrl, generatedOn }) => `
+  <div style="font-family:'Segoe UI','Source Sans 3',Arial,sans-serif;color:#1a1a2e;padding:20px 32px;font-size:12px;background:#fff;">
+    <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #1a1a2e;padding-bottom:10px;margin-bottom:6px;gap:12px;">
+      <div style="text-align:right;font-size:9.5px;line-height:1.8;color:#222;direction:rtl;">
+        الجمهورية الجزائرية الديمقراطية الشعبية<br/>
+        وزارة التعليم العالي والبحث العلمي<br/>
+        جامعة ابن خلدون - تيارت<br/>
+        كلية الرياضيات والإعلام الآلي
+      </div>
+      ${logoUrl ? `<img src="${logoUrl}" crossorigin="anonymous" style="width:64px;height:64px;object-fit:contain;" alt="Logo"/>` : ''}
+      <div style="text-align:right;font-size:9.5px;line-height:1.8;color:#222;">
+        République Algérienne Démocratique et Populaire<br/>
+        Ministère de l'Enseignement Supérieur et de la Recherche Scientifique<br/>
+        Université Ibn Khaldoun — Tiaret<br/>
+        Faculté des Mathématiques et de l'Informatique — Département Informatique
+      </div>
+    </div>
+    <hr style="border:none;border-top:1.5px solid #1a1a2e;margin:8px 0;"/>
+    ${ref ? `<p style="font-size:10px;color:#555;margin-bottom:18px;">Réf. : <strong>${ref}</strong></p>` : ''}
+    <div style="text-align:center;margin:18px 0 6px;">
+      <h1 style="font-size:20px;font-weight:700;letter-spacing:.5px;text-decoration:underline;text-underline-offset:4px;">${title}</h1>
+    </div>
+    <div style="font-size:12px;line-height:2.1;text-align:justify;margin:0 8px;">${bodyHTML}</div>
+    <p style="text-align:right;margin:28px 8px 0;font-size:11px;">Tiaret, le ${generatedOn}</p>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin:32px 8px 0;">
+      <div style="text-align:center;width:170px;">
+        <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#444;margin-bottom:4px;">L'intéressé(e)</div>
+        <div style="border-top:1.2px solid #1a1a2e;margin-top:48px;padding-top:4px;font-size:9px;color:#888;">Signature</div>
+      </div>
+      <div style="text-align:center;width:170px;">
+        <div style="width:90px;height:90px;border:1.5px dashed #aaa;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto;">
+          <span style="font-size:8px;color:#aaa;text-align:center;line-height:1.4;">Cachet du<br/>Département</span>
+        </div>
+      </div>
+      <div style="text-align:center;width:170px;">
+        <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#444;margin-bottom:4px;">Le Doyen / Chef de Département</div>
+        <div style="border-top:1.2px solid #1a1a2e;margin-top:48px;padding-top:4px;font-size:9px;color:#888;">Signature & Cachet</div>
+      </div>
+    </div>
+    <div style="border-top:1px solid #ccc;margin-top:36px;padding-top:8px;display:flex;justify-content:space-between;font-size:8px;color:#888;font-style:italic;">
+      <span>Généré le ${generatedOn}</span>
+      ${requestId ? `<span>Réf. demande #${requestId}</span>` : ''}
+      <span>Université Ibn Khaldoun — Tiaret</span>
+    </div>
+  </div>`;
+
+const generatePdfBlob = async ({ title, bodyHTML, requestId, ref }) => {
+  await ensurePdfLibs();
+  const generatedOn = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+  const container = document.createElement('div');
+  container.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;background:#fff;';
+  container.innerHTML = buildOfficialHTML({ title, bodyHTML, requestId, ref, logoUrl: univLogo, generatedOn });
+  document.body.appendChild(container);
+  try {
+    const canvas = await window.html2canvas(container, { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' });
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+    const pdfW = pdf.internal.pageSize.getWidth();
+    const pdfH = (canvas.height * pdfW) / canvas.width;
+    pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
+    return pdf.output('blob');
+  } finally {
+    document.body.removeChild(container);
+  }
+};
+
+const openPdfPreview = ({ title, bodyHTML, requestId, ref }) => {
+  const win = window.open('', '_blank');
+  if (!win) return;
+  const generatedOn = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+  const html = buildOfficialHTML({ title, bodyHTML, requestId, ref, logoUrl: univLogo, generatedOn });
+  win.document.write(
+    `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/><title>${title}</title>` +
+    `<style>body{margin:0}@media print{@page{size:A4;margin:10mm}}</style></head>` +
+    `<body>${html}<script>window.onload=()=>setTimeout(()=>window.print(),300);</script></body></html>`
+  );
+  win.document.close();
+};
 
 const FALLBACK_DOCUMENTS = [
   { id: 'doc-1', name: 'Enrollment Certificate', category: 'Administrative', format: 'PDF', size: '180 KB', updatedAt: '2026-03-01' },
@@ -150,7 +314,7 @@ const PROF_FIELDS = [
   },
 ];
 
-function ProfFormModal({ requestId, documentName, onClose, onSubmit, loading, initialData, fetchingData }) {
+function ProfFormModal({ requestId, documentName, onClose, onSubmit, onPreview, onDownload, loading, initialData, fetchingData }) {
   const [form, setForm] = useState(initialData || {});
   const [autoFilled, setAutoFilled] = useState(!!initialData && Object.keys(initialData).length > 0);
 
@@ -164,14 +328,18 @@ function ProfFormModal({ requestId, documentName, onClose, onSubmit, loading, in
   const handleChange = (name, value) =>
     setForm((prev) => ({ ...prev, [name]: value }));
 
-  const handleSubmit = () => {
+  const validate = () => {
     const missing = PROF_FIELDS.filter((f) => f.required && !String(form[f.name] || '').trim());
     if (missing.length) {
       alert(`Champs obligatoires manquants : ${missing.map((f) => f.label).join(', ')}`);
-      return;
+      return false;
     }
-    onSubmit(form);
+    return true;
   };
+
+  const handleSubmit = () => { if (validate()) onSubmit(form); };
+  const handlePreview = () => { if (validate() && onPreview) onPreview(form); };
+  const handleDownload = () => { if (validate() && onDownload) onDownload(form); };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
@@ -185,7 +353,7 @@ function ProfFormModal({ requestId, documentName, onClose, onSubmit, loading, in
               <p className="mt-0.5 text-sm text-ink-secondary">
                 {requestId && <span className="font-medium text-ink">Demande #{requestId} - </span>}
                 {documentName && <span className="font-medium text-ink">{documentName} - </span>}
-                Remplissez le formulaire ci-dessous pour générer l'attestation.
+                Le document officiel sera généré en PDF puis transmis au demandeur.
               </p>
 
               {autoFilled && (
@@ -272,7 +440,7 @@ function ProfFormModal({ requestId, documentName, onClose, onSubmit, loading, in
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-edge bg-canvas">
+        <div className="flex flex-wrap items-center justify-end gap-3 px-6 py-4 border-t border-edge bg-canvas">
           <button
             onClick={onClose}
             disabled={loading}
@@ -280,6 +448,35 @@ function ProfFormModal({ requestId, documentName, onClose, onSubmit, loading, in
           >
             Annuler
           </button>
+          {onPreview && (
+            <button
+              onClick={handlePreview}
+              disabled={loading || fetchingData}
+              className="rounded-xl border border-edge bg-surface px-4 py-2.5 text-sm font-medium text-ink transition hover:bg-canvas disabled:opacity-50 flex items-center gap-2"
+              title="Ouvrir un aperçu imprimable dans un nouvel onglet"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              Aperçu
+            </button>
+          )}
+          {onDownload && (
+            <button
+              onClick={handleDownload}
+              disabled={loading || fetchingData}
+              className="rounded-xl border border-edge bg-surface px-4 py-2.5 text-sm font-medium text-ink transition hover:bg-canvas disabled:opacity-50 flex items-center gap-2"
+              title="Télécharger le PDF sans l'envoyer"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              Télécharger
+            </button>
+          )}
           <button
             onClick={handleSubmit}
             disabled={loading || fetchingData}
@@ -296,7 +493,7 @@ function ProfFormModal({ requestId, documentName, onClose, onSubmit, loading, in
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                   <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
                 </svg>
-                Générer l'attestation & Envoyer
+                Générer le PDF & Envoyer
               </>
             )}
           </button>
@@ -668,15 +865,12 @@ function AdminView() {
   const [requests, setRequests] = useState([]);
   const [query, setQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
-  const [uploading, setUploading] = useState(null);
+  const [generating, setGenerating] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
-  const [pendingUploadId, setPendingUploadId] = useState(null);
-  const [pendingUploadMeta, setPendingUploadMeta] = useState(null);
   const [profModal, setProfModal] = useState(null);
   const [fetchingProfData, setFetchingProfData] = useState(false);
   const [openingModal, setOpeningModal] = useState(false);
   const [feedback, setFeedback] = useState(null);
-  const fileInputRef = useRef(null);
 
   const loadRequests = async () => {
     setLoading(true);
@@ -694,24 +888,18 @@ function AdminView() {
     loadRequests();
   }, []);
 
-  const handleUploadClick = async (requestRow) => {
+  const openProfModal = async (requestRow) => {
     setOpeningModal(true);
     setFeedback(null);
-
     try {
       setFetchingProfData(true);
       const enseignantNom = String(requestRow?.enseignantNom || '').trim();
       const [prenom = '', ...rest] = enseignantNom.split(' ').filter(Boolean);
       const nom = rest.join(' ');
-
       setProfModal({
         requestId: requestRow?.id,
         documentName: requestRow?.name,
-        initialData: {
-          prenom,
-          nom,
-          departement: requestRow?.category || '',
-        },
+        initialData: { prenom, nom, departement: requestRow?.category || '' },
       });
     } finally {
       setFetchingProfData(false);
@@ -719,71 +907,77 @@ function AdminView() {
     }
   };
 
-  const handleProfSubmit = (formData) => {
-    if (!profModal?.requestId) {
-      return;
-    }
-
-    setPendingUploadId(profModal.requestId);
-    setPendingUploadMeta(formData);
-    setProfModal(null);
-    fileInputRef.current?.click();
-  };
-
   const closeProfModal = () => {
-    if (openingModal) {
-      return;
-    }
+    if (openingModal || generating) return;
     setProfModal(null);
   };
 
-  const resetUploadFlow = () => {
-    setPendingUploadId(null);
-    setPendingUploadMeta(null);
+  const makePdfPayload = (formData) => {
+    const title = profModal?.documentName || 'Document officiel';
+    const ref = buildReferenceCode(profModal?.requestId, profModal?.documentName);
+    const bodyHTML = buildDocumentBody(formData, profModal?.documentName);
+    return { title, ref, bodyHTML, requestId: profModal?.requestId };
   };
 
-  const handleFileChange = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file || !pendingUploadId) {
-      event.target.value = '';
-      resetUploadFlow();
-      return;
-    }
-
-    const requestId = pendingUploadId;
-    event.target.value = '';
-    setUploading(requestId);
+  const handleProfSubmit = async (formData) => {
+    if (!profModal?.requestId) return;
+    const requestId = profModal.requestId;
+    setGenerating(requestId);
     setFeedback(null);
-
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('requestId', String(requestId));
-      if (pendingUploadMeta) {
-        formData.append('profForm', JSON.stringify(pendingUploadMeta));
-      }
+      const payload = makePdfPayload(formData);
+      const blob = await generatePdfBlob(payload);
 
-      await request('/api/v1/documents/upload', {
-        method: 'POST',
-        body: formData,
-      });
+      const upload = new FormData();
+      const safeName = String(payload.title).replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'document';
+      upload.append('file', blob, `${safeName}_${requestId}.pdf`);
+      upload.append('requestId', String(requestId));
+      upload.append('profForm', JSON.stringify(formData));
 
-      // Treat upload as full delivery to the requester.
+      await request('/api/v1/documents/upload', { method: 'POST', body: upload });
       await request(`/api/v1/documents/${requestId}/valider`, {
         method: 'PATCH',
         body: JSON.stringify({ action: 'valide' }),
       });
 
-      setFeedback({ type: 'success', message: 'Attestation transmise au demandeur avec succes.' });
+      setFeedback({ type: 'success', message: 'Document PDF généré et transmis au demandeur avec succès.' });
+      setProfModal(null);
       await loadRequests();
     } catch (error) {
       setFeedback({
         type: 'error',
-        message: error?.message || 'Echec de l\'envoi du document. Verifiez votre session et le format du fichier.',
+        message: error?.message || "Échec de la génération ou de l'envoi du document.",
       });
     } finally {
-      setUploading(null);
-      resetUploadFlow();
+      setGenerating(null);
+    }
+  };
+
+  const handleProfPreview = (formData) => {
+    if (!profModal?.requestId) return;
+    openPdfPreview(makePdfPayload(formData));
+  };
+
+  const handleProfDownload = async (formData) => {
+    if (!profModal?.requestId) return;
+    setGenerating(profModal.requestId);
+    setFeedback(null);
+    try {
+      const payload = makePdfPayload(formData);
+      const blob = await generatePdfBlob(payload);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const safeName = String(payload.title).replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'document';
+      a.href = url;
+      a.download = `${safeName}_${profModal.requestId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      setFeedback({ type: 'error', message: error?.message || 'Échec du téléchargement du PDF.' });
+    } finally {
+      setGenerating(null);
     }
   };
 
@@ -833,21 +1027,15 @@ function AdminView() {
 
   return (
     <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '0 16px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".pdf,.doc,.docx"
-        style={{ display: 'none' }}
-        onChange={handleFileChange}
-      />
-
       {profModal && (
         <ProfFormModal
           requestId={profModal.requestId}
           documentName={profModal.documentName}
           onClose={closeProfModal}
           onSubmit={handleProfSubmit}
-          loading={openingModal || uploading === profModal.requestId}
+          onPreview={handleProfPreview}
+          onDownload={handleProfDownload}
+          loading={openingModal || generating === profModal.requestId}
           initialData={profModal.initialData}
           fetchingData={fetchingProfData}
         />
@@ -857,7 +1045,7 @@ function AdminView() {
       <DocumentsHero
         eyebrow="Administration"
         title="Gestion des documents"
-        description="Traitez les demandes des enseignants, chargez les fichiers puis validez ou refusez les documents."
+        description="Traitez les demandes des enseignants : remplissez les informations, générez le PDF officiel et transmettez-le automatiquement au demandeur."
       />
 
       {/* KPI Analytics Header - High-impact metrics */}
@@ -1070,8 +1258,9 @@ function AdminView() {
                           {(row.status === 'en_attente' || row.status === 'en_traitement') && (
                             <button
                               type="button"
-                              onClick={() => handleUploadClick(row)}
-                              disabled={uploading === row.id}
+                              onClick={() => openProfModal(row)}
+                              disabled={generating === row.id}
+                              title="Générer le document PDF"
                               style={{
                                 borderRadius: '4px',
                                 border: '1px solid var(--color-edge)',
@@ -1080,12 +1269,12 @@ function AdminView() {
                                 padding: '6px 12px',
                                 fontSize: '11px',
                                 fontWeight: 600,
-                                cursor: uploading === row.id ? 'wait' : 'pointer',
-                                opacity: uploading === row.id ? 0.6 : 1,
+                                cursor: generating === row.id ? 'wait' : 'pointer',
+                                opacity: generating === row.id ? 0.6 : 1,
                                 transition: 'all 150ms ease-out',
                               }}
                             >
-                              {uploading === row.id ? '⏳' : '📤'}
+                              {generating === row.id ? '⏳' : '📝'}
                             </button>
                           )}
                           {row.status === 'en_traitement' && (

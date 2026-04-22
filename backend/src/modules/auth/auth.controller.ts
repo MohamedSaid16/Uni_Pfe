@@ -97,6 +97,28 @@ const parseRoleNames = (rawValue: string): string[] => {
   );
 };
 
+const readHeaderValue = (value: string | string[] | undefined): string => {
+  if (Array.isArray(value)) {
+    return String(value[0] || "").trim();
+  }
+
+  return String(value || "").trim();
+};
+
+const getRefreshTokenFromRequest = (req: Request): string | undefined => {
+  const fromCustomHeader = readHeaderValue(req.headers["x-refresh-token"]);
+  if (fromCustomHeader) {
+    return fromCustomHeader;
+  }
+
+  const fromCookie = req.cookies?.[REFRESH_TOKEN_COOKIE_NAME];
+  if (typeof fromCookie === "string" && fromCookie.trim()) {
+    return fromCookie;
+  }
+
+  return undefined;
+};
+
 const parseExcelUserRow = (row: Record<string, unknown>): ParsedExcelImportRow => {
   const nom = pickCellValue(row, ["nom", "lastName", "last_name"]);
   const prenom = pickCellValue(row, ["prenom", "firstName", "first_name"]);
@@ -136,6 +158,7 @@ export const register = async (req: Request, res: Response) => {
       data: {
         user: result.user,
         accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
       },
       message: "Registration successful. Please check your email for verification.",
     });
@@ -163,6 +186,7 @@ export const login = async (req: Request, res: Response) => {
       data: {
         user: result.user,
         accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
         requiresPasswordChange: result.requiresPasswordChange,
       },
       message: "Login successful",
@@ -180,7 +204,7 @@ export const login = async (req: Request, res: Response) => {
 
 export const refresh = async (req: Request, res: Response) => {
   try {
-    const token = req.cookies?.[REFRESH_TOKEN_COOKIE_NAME];
+    const token = getRefreshTokenFromRequest(req);
     if (!token) {
       return res.status(401).json({
         success: false,
@@ -198,7 +222,7 @@ export const refresh = async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
-      data: { accessToken },
+      data: { accessToken, refreshToken },
       message: "Tokens refreshed successfully",
     });
   } catch (error: any) {
@@ -214,7 +238,7 @@ export const refresh = async (req: Request, res: Response) => {
 
 export const logout = async (req: Request, res: Response) => {
   try {
-    const token = req.cookies?.[REFRESH_TOKEN_COOKIE_NAME];
+    const token = getRefreshTokenFromRequest(req);
     if (token) {
       await logoutUser(token);
     }

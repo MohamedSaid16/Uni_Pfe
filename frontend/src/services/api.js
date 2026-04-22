@@ -12,36 +12,60 @@ const DEFAULT_API_HOST =
 
 const API_BASE = process.env.REACT_APP_API_URL || `http://${DEFAULT_API_HOST}:5000`;
 const ACCESS_TOKEN_STORAGE_KEY = 'pfe_access_token';
+const REFRESH_TOKEN_STORAGE_KEY = 'pfe_refresh_token';
 
-let accessToken = '';
-if (typeof window !== 'undefined') {
+function readSessionToken(storageKey) {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
   try {
-    accessToken = window.sessionStorage.getItem(ACCESS_TOKEN_STORAGE_KEY) || '';
+    return window.sessionStorage.getItem(storageKey) || '';
   } catch {
-    accessToken = '';
+    return '';
   }
 }
 
-export function setAccessToken(token) {
-  accessToken = String(token || '');
-
+function writeSessionToken(storageKey, tokenValue) {
   if (typeof window === 'undefined') {
     return;
   }
 
   try {
-    if (accessToken) {
-      window.sessionStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, accessToken);
+    if (tokenValue) {
+      window.sessionStorage.setItem(storageKey, tokenValue);
     } else {
-      window.sessionStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+      window.sessionStorage.removeItem(storageKey);
     }
   } catch {
     // storage can be unavailable in private mode; keep in-memory fallback
   }
 }
 
+let accessToken = readSessionToken(ACCESS_TOKEN_STORAGE_KEY);
+let refreshToken = readSessionToken(REFRESH_TOKEN_STORAGE_KEY);
+
+export function setAccessToken(token) {
+  accessToken = String(token || '');
+  writeSessionToken(ACCESS_TOKEN_STORAGE_KEY, accessToken);
+}
+
+export function setRefreshToken(token) {
+  refreshToken = String(token || '');
+  writeSessionToken(REFRESH_TOKEN_STORAGE_KEY, refreshToken);
+}
+
+export function clearRefreshToken() {
+  setRefreshToken('');
+}
+
 export function clearAccessToken() {
   setAccessToken('');
+}
+
+function clearStoredTokens() {
+  clearAccessToken();
+  clearRefreshToken();
 }
 
 export function resolveMediaUrl(value) {
@@ -115,9 +139,12 @@ async function request(endpoint, options = {}, _isRetry = false) {
         const refreshRes = await fetch(`${API_BASE}/api/v1/auth/refresh-token`, {
           method: 'POST',
           credentials: 'include',
+          headers: refreshToken
+            ? { 'x-refresh-token': refreshToken }
+            : undefined,
         });
         if (!refreshRes.ok) {
-          clearAccessToken();
+          clearStoredTokens();
           const refreshError = new Error('Session expired. Please sign in again.');
           refreshError.status = refreshRes.status;
           throw refreshError;
@@ -135,9 +162,14 @@ async function request(endpoint, options = {}, _isRetry = false) {
           setAccessToken(refreshedToken);
         }
 
+        const refreshedRefreshToken = refreshPayload?.data?.refreshToken || refreshPayload?.refreshToken;
+        if (typeof refreshedRefreshToken === 'string' && refreshedRefreshToken.trim()) {
+          setRefreshToken(refreshedRefreshToken);
+        }
+
         processQueue(null);
       } catch (refreshErr) {
-        clearAccessToken();
+        clearStoredTokens();
         processQueue(refreshErr);
         throw refreshErr;
       } finally {
@@ -228,10 +260,16 @@ export const authAPI = {
     }),
 
   logout: () =>
-    request('/api/v1/auth/logout', { method: 'POST' }),
+    request('/api/v1/auth/logout', {
+      method: 'POST',
+      headers: refreshToken ? { 'x-refresh-token': refreshToken } : {},
+    }),
 
   refreshToken: () =>
-    request('/api/v1/auth/refresh-token', { method: 'POST' }),
+    request('/api/v1/auth/refresh-token', {
+      method: 'POST',
+      headers: refreshToken ? { 'x-refresh-token': refreshToken } : {},
+    }),
 
   getMe: () =>
     request('/api/v1/auth/me'),

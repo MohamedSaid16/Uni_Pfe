@@ -30,10 +30,24 @@ type UserRoleRecord = {
   } | null;
 };
 
+const extractBearerToken = (authorizationHeader?: string): string | undefined => {
+  if (!authorizationHeader) {
+    return undefined;
+  }
+
+  const [scheme, token] = authorizationHeader.split(" ");
+  if (scheme?.toLowerCase() !== "bearer" || !token) {
+    return undefined;
+  }
+
+  const normalized = token.trim();
+  return normalized || undefined;
+};
+
 export const requireAuth = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const token =
-      req.headers.authorization?.split(" ")[1] ||
+      extractBearerToken(req.headers.authorization) ||
       req.cookies?.[ACCESS_TOKEN_COOKIE_NAME];
 
     if (!token) {
@@ -150,7 +164,7 @@ export const requireAuth = async (req: AuthRequest, res: Response, next: NextFun
 export const optionalAuth = async (req: AuthRequest, _res: Response, next: NextFunction) => {
   try {
     const token =
-      req.headers.authorization?.split(" ")[1] ||
+      extractBearerToken(req.headers.authorization) ||
       req.cookies?.[ACCESS_TOKEN_COOKIE_NAME];
 
     if (!token) {
