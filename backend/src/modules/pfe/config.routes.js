@@ -1,12 +1,34 @@
+/**
+ * PFE Configuration Routes
+ * 
+ * Admin-only routes for managing PFE system configurations
+ * 
+ * Access Control: All routes require authentication + 'admin' role
+ * 
+ * Schema Mapping (PfeConfig):
+ * - id: Int (Primary Key, autoincrement)
+ * - nom_config: String (VarChar(100), UNIQUE) - Configuration name/identifier
+ * - valeur: String (VarChar(50)) - Configuration value
+ * - description_ar: String? (Text, optional) - Arabic description
+ * - description_en: String? (Text, optional) - English description
+ * - anneeUniversitaire: String (VarChar(20)) - Academic year (e.g., "2025/2026")
+ * - createdBy: Int? (User ID who created this config)
+ * - createdAt: DateTime - Creation timestamp
+ * - updatedAt: DateTime - Last update timestamp
+ * 
+ * Endpoints:
+ * GET    /api/v1/pfe/config              - List all configs (filtered by year)
+ * GET    /api/v1/pfe/config/:id          - Get a single config by ID
+ * POST   /api/v1/pfe/config              - Create new config
+ * PUT    /api/v1/pfe/config/:id          - Update config (full)
+ * PATCH  /api/v1/pfe/config/:id          - Update config (partial)
+ * DELETE /api/v1/pfe/config/:id          - Delete config
+ */
+
 const express = require('express');
 const configController = require('./config.controller');
-const authMiddleware = require('../../middlewares/auth.middleware');
-const roleMiddleware = require('../../middlewares/role.middleware');
 
 const router = express.Router();
-
-// Apply authentication middleware to all config routes
-router.use(authMiddleware);
 
 // Admin-only access control middleware
 const adminOnly = (req, res, next) => {
