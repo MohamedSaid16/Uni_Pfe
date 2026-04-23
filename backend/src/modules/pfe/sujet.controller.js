@@ -130,10 +130,40 @@ if (!propositionOuverte || propositionOuverte.valeur !== 'true') {
   // Récupérer tous les sujets
   async getAll(req, res) {
     try {
+      const teacherId = toPositiveInt(req.query.enseignantId ?? req.query.teacherId ?? req.query.teacherProfileId);
+      const status = typeof req.query.status === 'string' && req.query.status.trim() ? req.query.status.trim() : null;
+      const anneeUniversitaire =
+        typeof req.query.anneeUniversitaire === 'string' && req.query.anneeUniversitaire.trim()
+          ? req.query.anneeUniversitaire.trim()
+          : null;
+
+      const where = {};
+
+      if (teacherId) {
+        where.enseignantId = teacherId;
+      }
+
+      if (status) {
+        where.status = status;
+      }
+
+      if (anneeUniversitaire) {
+        where.anneeUniversitaire = anneeUniversitaire;
+      }
+
       const sujets = await prisma.pfeSujet.findMany({
+        where,
+        orderBy: [
+          { createdAt: 'desc' },
+          { id: 'desc' },
+        ],
         include: {
-          enseignant: true,
-          promo: true
+          enseignant: {
+            include: { user: true }
+          },
+          promo: true,
+          groupsPfe: true,
+          groupSujets: true,
         }
       });
       res.json({ success: true, data: sujets });

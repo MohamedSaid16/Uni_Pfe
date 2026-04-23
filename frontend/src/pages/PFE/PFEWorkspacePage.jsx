@@ -1,6 +1,6 @@
 /*
   Intent: Unified PFE management workspace with role-based access control.
-          - Admins: Validation queue with approve/reject controls
+          - Admins: Validation queue with approve/reject controls + config management
           - Teachers: Subject creation form + their proposals dashboard
           - Students: Subject gallery with single-selection constraint
   Access: Teacher / Admin / Student with role-based UI adaptation.
@@ -20,9 +20,11 @@ import {
   Clock3,
   Pencil,
   Plus,
+  Settings,
 } from 'lucide-react';
 import request from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import PfeConfigView from './PfeConfigView';
 
 /* ── Inline SVG Icons (stroke 1.5) ─────────────────────────── */
 
@@ -35,6 +37,7 @@ const icons = {
   clock: (p) => <Clock3 {...p} />,
   edit: (p) => <Pencil {...p} />,
   plus: (p) => <Plus {...p} />,
+  settings: (p) => <Settings {...p} />,
 };
 
 /* ── Status Configs ─────────────────────────────────────────── */
@@ -59,6 +62,7 @@ const ADMIN_TABS = [
   { id: 'subjects', label: 'Validation Queue', Icon: icons.book },
   { id: 'groups', label: 'Groups', Icon: icons.users },
   { id: 'defense', label: 'Defense Plan', Icon: icons.calendar },
+  { id: 'config', label: 'Configuration', Icon: icons.settings },
 ];
 
 const TEACHER_TABS = [
@@ -203,6 +207,7 @@ function TeacherSubjectsView({ subjects, loading, error, onRefresh, teacherProfi
       });
       setFormData({ titre_ar: '', titre_en: '', description_ar: '', description_en: '', typeProjet: 'application', maxGrps: 1 });
       setShowForm(false);
+      console.log('[TeacherSubjectsView] Form submitted, refreshing...');
       onRefresh();
     } catch (err) {
       alert('Failed to create subject: ' + err.message);
@@ -211,7 +216,8 @@ function TeacherSubjectsView({ subjects, loading, error, onRefresh, teacherProfi
     }
   };
 
-  const teacherSubjects = subjects.filter(s => s.status !== 'valide' || s.enseignant?.user);
+  console.log('[TeacherSubjectsView] render - subjects count:', subjects.length, 'teacherProfileId:', teacherProfileId);
+  const teacherSubjects = subjects;
 
   return (
     <div className="space-y-6">
@@ -545,6 +551,7 @@ export default function PFEWorkspacePage() {
   const isAdmin = userRoles.includes('admin');
   const isTeacher = userRoles.includes('enseignant');
   const isStudent = userRoles.includes('etudiant');
+  const teacherProfileId = user?.enseignant?.id;
 
   const availableTabs = isAdmin ? ADMIN_TABS : isTeacher ? TEACHER_TABS : STUDENT_TABS;
 
@@ -552,6 +559,7 @@ export default function PFEWorkspacePage() {
   const [activeTab, setActiveTab] = useState('subjects');
   const [subjects, setSubjects] = useState([]);
   const [groups, setGroups] = useState([]);
+  const [configs, setConfigs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedSubjectId, setSelectedSubjectId] = useState(null);
@@ -562,17 +570,25 @@ export default function PFEWorkspacePage() {
     try {
       setLoading(true);
       setError('');
-      const endpoint = isStudent ? '/api/v1/pfe/sujets?status=valide' : '/api/v1/pfe/sujets';
+      const endpoint = isStudent
+        ? '/api/v1/pfe/sujets?status=valide'
+        : isTeacher && teacherProfileId
+          ? `/api/v1/pfe/sujets?enseignantId=${teacherProfileId}`
+          : '/api/v1/pfe/sujets';
+      console.log('[PFE] loadSubjects endpoint:', endpoint, 'teacherProfileId:', teacherProfileId);
       const response = await request(endpoint);
       const data = Array.isArray(response?.data) ? response.data : [];
+      console.log('[PFE] loaded subjects count:', data.length, 'subjects:', data);
       setSubjects(data);
     } catch (err) {
+      console.error('[PFE] loadSubjects error:', err);
       setError(err?.message || 'Failed to load subjects');
       setSubjects([]);
     } finally {
       setLoading(false);
     }
-  }, [isStudent]);
+  }, [isStudent, isTeacher, teacherProfileId]);
+  const teacherSubjects = subjects;
 
   const loadGroups = useCallback(async () => {
     try {
@@ -602,6 +618,21 @@ export default function PFEWorkspacePage() {
     }
   }, []);
 
+  const loadConfigs = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError('');
+      const response = await request('/api/v1/pfe/config');
+      const data = Array.isArray(response?.data) ? response.data : [];
+      setConfigs(data);
+    } catch (err) {
+      setError(err?.message || 'Failed to load configurations');
+      setConfigs([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (activeTab === 'subjects') {
       loadSubjects();
@@ -609,15 +640,17 @@ export default function PFEWorkspacePage() {
       loadGroups();
     } else if (activeTab === 'defense') {
       loadJury();
+    } else if (activeTab === 'config') {
+      loadConfigs();
     }
-  }, [activeTab, loadSubjects, loadGroups, loadJury]);
+  }, [activeTab, loadSubjects, loadGroups, loadJury, loadConfigs]);
 
   /* ── Admin Actions ──────────────────────────────────────────– */
 
   const handleValidate = async (sujetId) => {
     try {
-      await request(`/api/v1/pfe/sujets/${sujetId}/validate`, {
-        method: 'PATCH',
+      await request(`/api/v1/pfe/sujets/${sujetId}/valider`, {
+        method: 'PUT',
         body: JSON.stringify({ adminId: user?.id }),
       });
       loadSubjects();
@@ -628,8 +661,8 @@ export default function PFEWorkspacePage() {
 
   const handleReject = async (sujetId) => {
     try {
-      await request(`/api/v1/pfe/sujets/${sujetId}/reject`, {
-        method: 'PATCH',
+      await request(`/api/v1/pfe/sujets/${sujetId}/refuser`, {
+        method: 'PUT',
         body: JSON.stringify({ adminId: user?.id }),
       });
       loadSubjects();
@@ -670,7 +703,7 @@ export default function PFEWorkspacePage() {
           loading={loading}
           error={error}
           onRefresh={loadSubjects}
-          teacherProfileId={user?.enseignant?.id}
+          teacherProfileId={teacherProfileId}
         />
       );
     } else {
@@ -707,6 +740,17 @@ export default function PFEWorkspacePage() {
     </div>
   );
 
+  /* ── Render: Config Tab (Admin Only) ─────────────────────────– */
+
+  const renderConfigTab = () => (
+    <PfeConfigView
+      configs={configs}
+      loading={loading}
+      error={error}
+      onRefresh={loadConfigs}
+    />
+  );
+
   /* ── Main Render ────────────────────────────────────────────– */
 
   return (
@@ -738,6 +782,7 @@ export default function PFEWorkspacePage() {
           {activeTab === 'subjects' && renderSubjectsTab()}
           {activeTab === 'groups' && renderGroupsTab()}
           {activeTab === 'defense' && renderDefenseTab()}
+          {activeTab === 'config' && renderConfigTab()}
         </div>
       </div>
     </div>
