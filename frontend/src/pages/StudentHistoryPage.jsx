@@ -1,6 +1,6 @@
 /*
   StudentHistoryPage — Student self-view of their activity history.
-  Sections: Disciplinary councils, Reclamations, Justifications, Submissions.
+  Sections: Disciplinary councils, Reclamations, Justifications.
   Data: GET /api/v1/history/student/me
 */
 
@@ -11,7 +11,6 @@ const TABS = [
   { id: 'disciplinary', label: 'Disciplinary councils' },
   { id: 'reclamations', label: 'Reclamations' },
   { id: 'justifications', label: 'Justifications' },
-  { id: 'submissions', label: 'Submissions' },
 ];
 
 function formatDate(value) {
@@ -73,7 +72,6 @@ export default function StudentHistoryPage({ endpoint = '/api/v1/history/student
     disciplinary: data?.disciplinaryCouncils?.length || 0,
     reclamations: data?.reclamations?.length || 0,
     justifications: data?.justifications?.length || 0,
-    submissions: data?.submissions?.length || 0,
   }), [data]);
 
   if (loading) {
@@ -116,7 +114,6 @@ export default function StudentHistoryPage({ endpoint = '/api/v1/history/student
         )}
         {tab === 'reclamations' && <ReclamationsList items={data?.reclamations || []} />}
         {tab === 'justifications' && <JustificationsList items={data?.justifications || []} />}
-        {tab === 'submissions' && <SubmissionsList items={data?.submissions || []} />}
       </section>
     </div>
   );
@@ -208,24 +205,6 @@ function JustificationsList({ items }) {
           <p className="text-xs text-gray-500 mt-1">
             Absence date: {formatDate(j.dateAbsence)} · Submitted: {formatDate(j.createdAt)}
           </p>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function SubmissionsList({ items }) {
-  if (!items.length) return <EmptyRow label="submissions" />;
-  return (
-    <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
-      {items.map((s) => (
-        <li key={s.id} className="p-4">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-medium text-gray-900">{s.subject || s.type}</p>
-            <Badge tone="info">{s.type}</Badge>
-          </div>
-          <p className="text-xs text-gray-500 mt-1">Submitted: {formatDate(s.createdAt)}</p>
-          <p className="text-sm text-gray-700 mt-2 line-clamp-3">{s.message}</p>
         </li>
       ))}
     </ul>

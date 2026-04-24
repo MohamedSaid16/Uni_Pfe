@@ -1435,10 +1435,11 @@ export const getReclamationTypes = async (_req: AuthRequest, res: Response): Pro
   try {
     await ensureDefaultReclamationTypes();
     const types = await prisma.reclamationType.findMany({
-      select: { id: true, nom_ar: true, nom_en: true, description_ar: true, description_en: true },
+      select: { id: true, code: true, nom_ar: true, nom_en: true, description_ar: true, description_en: true },
       orderBy: { id: "asc" },
     });
-    res.status(200).json({ success: true, data: types });
+    const data = types.map((t) => ({ ...t, nom: t.nom_en || t.nom_ar || "" }));
+    res.status(200).json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, error: { code: "INTERNAL_ERROR", message: "Internal server error" } });
   }
@@ -1449,10 +1450,11 @@ export const getJustificationTypes = async (_req: AuthRequest, res: Response): P
   try {
     await ensureDefaultJustificationTypes();
     const types = await prisma.typeAbsence.findMany({
-      select: { id: true, nom_ar: true, nom_en: true, description_ar: true, description_en: true },
+      select: { id: true, code: true, nom_ar: true, nom_en: true, description_ar: true, description_en: true },
       orderBy: { id: "asc" },
     });
-    res.status(200).json({ success: true, data: types });
+    const data = types.map((t) => ({ ...t, nom: t.nom_en || t.nom_ar || "" }));
+    res.status(200).json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, error: { code: "INTERNAL_ERROR", message: "Internal server error" } });
   }

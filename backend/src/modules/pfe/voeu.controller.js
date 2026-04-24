@@ -1,6 +1,18 @@
 const { PrismaClient } = require('@prisma/client');
+const { assertGroupNotFinalized } = require('./pfe-lock.service');
 
 const prisma = new PrismaClient();
+
+const respondIfPfeFinalized = (res, error) => {
+  if (error && error.code === 'PFE_FINALIZED') {
+    res.status(423).json({
+      success: false,
+      error: { code: error.code, message: error.message },
+    });
+    return true;
+  }
+  return false;
+};
 
 class VoeuController {
   // Ajouter un vœu pour un groupe
@@ -8,7 +20,10 @@ class VoeuController {
     try {
       const { groupId } = req.params;
       const { sujetId, ordre } = req.body;
-      
+
+      // Lock guard — reject if the group's PFE has been finalized.
+      await assertGroupNotFinalized(parseInt(groupId));
+
       const voeu = await prisma.groupSujet.create({
         data: {
           groupId: parseInt(groupId),
@@ -27,9 +42,10 @@ class VoeuController {
           }
         }
       });
-      
+
       res.status(201).json({ success: true, data: voeu });
     } catch (error) {
+      if (respondIfPfeFinalized(res, error)) return;
       console.error('Erreur ajout vœu:', error);
       res.status(500).json({ success: false, error: error.message });
     }
@@ -88,11 +104,22 @@ class VoeuController {
   async delete(req, res) {
     try {
       const { id } = req.params;
+
+      // Lock guard — reject if the underlying group's PFE has been finalized.
+      const existing = await prisma.groupSujet.findUnique({
+        where: { id: parseInt(id) },
+        select: { groupId: true },
+      });
+      if (existing) {
+        await assertGroupNotFinalized(existing.groupId);
+      }
+
       await prisma.groupSujet.delete({
         where: { id: parseInt(id) }
       });
       res.json({ success: true, message: 'Vœu supprimé' });
     } catch (error) {
+      if (respondIfPfeFinalized(res, error)) return;
       console.error(error);
       res.status(500).json({ success: false, error: error.message });
     }

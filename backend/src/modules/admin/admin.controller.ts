@@ -18,6 +18,10 @@ import {
   updateReclamation,
   updateUserRole,
 } from "./admin.service";
+import { getAdminStatistics } from "../dashboard/statistics.service";
+import prisma from "../../config/database";
+import { getStudentPanelDashboard } from "../student/student-panel.service";
+import { getTeacherDashboard } from "../teacher/teacher.service";
 
 const parsePositiveInt = (value: unknown): number | undefined => {
   const parsed = Number(value);
@@ -97,6 +101,93 @@ export const getAdminDashboardOverviewHandler = async (_req: AuthRequest, res: R
     });
   } catch (error: unknown) {
     handleControllerError(res, error, "ADMIN_OVERVIEW_FAILED");
+  }
+};
+
+export const getAdminAnalyticsHandler = async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const analytics = await getAdminStatistics();
+    res.status(200).json({
+      success: true,
+      data: analytics,
+    });
+  } catch (error: unknown) {
+    handleControllerError(res, error, "ADMIN_ANALYTICS_FAILED");
+  }
+};
+
+/**
+ * Admin user inspection — returns the SAME dashboard payload the target
+ * user would see themselves.
+ *
+ * Zero duplication of statistics logic: this delegates to the existing role
+ * dashboard services. If a student's numbers change shape there, they change
+ * here automatically.
+ */
+export const getAdminUserStatsHandler = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const targetUserId = Number(req.params.id);
+    if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+      res.status(400).json({
+        success: false,
+        error: { code: "INVALID_USER_ID", message: "User id must be a positive integer" },
+      });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: {
+        id: true,
+        nom: true,
+        prenom: true,
+        email: true,
+        etudiant: { select: { id: true } },
+        enseignant: { select: { id: true } },
+      },
+    });
+
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        error: { code: "USER_NOT_FOUND", message: "User not found" },
+      });
+      return;
+    }
+
+    const identity = {
+      id: user.id,
+      fullName: `${user.prenom ?? ""} ${user.nom ?? ""}`.trim(),
+      email: user.email,
+    };
+
+    if (user.etudiant) {
+      const dashboard = await getStudentPanelDashboard(targetUserId);
+      res.status(200).json({
+        success: true,
+        data: { role: "student", user: identity, dashboard },
+      });
+      return;
+    }
+
+    if (user.enseignant) {
+      const dashboard = await getTeacherDashboard(targetUserId);
+      res.status(200).json({
+        success: true,
+        data: { role: "teacher", user: identity, dashboard },
+      });
+      return;
+    }
+
+    res.status(400).json({
+      success: false,
+      error: {
+        code: "UNSUPPORTED_ROLE",
+        message: "This user is neither a student nor a teacher and has no dashboard to inspect.",
+      },
+    });
+  } catch (error: unknown) {
+    handleControllerError(res, error, "ADMIN_USER_STATS_FAILED");
   }
 };
 

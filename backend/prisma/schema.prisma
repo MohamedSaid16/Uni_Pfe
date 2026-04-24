@@ -195,6 +195,7 @@ model User {
   status        UserStatus @default(active)
   lastLogin     DateTime?  @map("last_login")
   loginAttempts Int        @default(0) @map("login_attempts")
+  lockUntil     DateTime?  @map("lock_until")
 
   // Timestamps
   createdAt DateTime  @default(now()) @map("created_at")
@@ -556,6 +557,13 @@ model PfeSujet {
   bibliographie_en   String?     @db.Text
   typeProjet         TypeProjet  @default(application) @map("type_projet")
   status             StatusSujet @default(propose)
+  // Assignment lifecycle lock — orthogonal to `status` (which is the subject's
+  // editorial state). Values: "draft" | "assigned" | "finalized".
+  // When "finalized", the PFE is locked: students cannot change topic, leave
+  // their group, or alter the assignment. Kept as free-form String (not an
+  // enum) so new lock states can be added without another migration.
+  assignmentStatus   String      @default("draft") @map("assignment_status") @db.VarChar(30)
+  finalizedAt        DateTime?   @map("finalized_at")
   anneeUniversitaire String      @map("annee_universitaire") @db.VarChar(20)
   maxGrps            Int         @default(1) @map("max_grps")
   createdAt          DateTime    @default(now()) @map("created_at")
@@ -848,6 +856,7 @@ model DossierDisciplinaire {
 
 model ReclamationType {
   id             Int     @id @default(autoincrement())
+  code           String? @unique @db.VarChar(60)
   nom_ar         String? @db.VarChar(150)
   nom_en         String? @db.VarChar(150)
   description_ar String? @db.Text
@@ -900,6 +909,7 @@ model Reclamation {
 
 model TypeAbsence {
   id             Int     @id @default(autoincrement())
+  code           String? @unique @db.VarChar(60)
   nom_ar         String? @db.VarChar(100)
   nom_en         String? @db.VarChar(100)
   description_ar String? @db.Text

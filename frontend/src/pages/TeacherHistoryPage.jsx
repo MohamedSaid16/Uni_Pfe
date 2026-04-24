@@ -1,6 +1,6 @@
 /*
   TeacherHistoryPage — Teacher self-view of their activity history.
-  Sections: Reported students (disciplinary), PFE projects with group members, Submissions.
+  Sections: Reported students (disciplinary), PFE projects with group members, Documents.
   Data: GET /api/v1/history/teacher/me
 */
 
@@ -10,7 +10,7 @@ import request from '../services/api';
 const TABS = [
   { id: 'reported', label: 'Reported students' },
   { id: 'pfe', label: 'PFE projects' },
-  { id: 'submissions', label: 'Submissions' },
+  { id: 'documents', label: 'Documents' },
 ];
 
 function formatDate(value) {
@@ -69,7 +69,7 @@ export default function TeacherHistoryPage({ endpoint = '/api/v1/history/teacher
   const counts = useMemo(() => ({
     reported: data?.reportedStudents?.length || 0,
     pfe: data?.pfeProjects?.length || 0,
-    submissions: data?.submissions?.length || 0,
+    documents: data?.documents?.length || 0,
   }), [data]);
 
   if (loading) {
@@ -109,7 +109,7 @@ export default function TeacherHistoryPage({ endpoint = '/api/v1/history/teacher
       <section>
         {tab === 'reported' && <ReportedStudents items={data?.reportedStudents || []} />}
         {tab === 'pfe' && <PfeProjects items={data?.pfeProjects || []} />}
-        {tab === 'submissions' && <TeacherSubmissions items={data?.submissions || []} />}
+        {tab === 'documents' && <TeacherDocuments items={data?.documents || []} />}
       </section>
     </div>
   );
@@ -212,18 +212,36 @@ function PfeProjects({ items }) {
   );
 }
 
-function TeacherSubmissions({ items }) {
-  if (!items.length) return <EmptyRow label="submissions" />;
+function docStatusTone(status) {
+  const s = String(status || '').toLowerCase();
+  if (['valide'].includes(s)) return 'success';
+  if (['refuse'].includes(s)) return 'danger';
+  if (['en_traitement'].includes(s)) return 'warning';
+  return 'info';
+}
+
+function TeacherDocuments({ items }) {
+  if (!items.length) return <EmptyRow label="documents" />;
   return (
     <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
-      {items.map((s) => (
-        <li key={s.id} className="p-4">
+      {items.map((d) => (
+        <li key={d.id} className="p-4">
           <div className="flex items-center gap-2">
-            <p className="text-sm font-medium text-gray-900">{s.subject || s.type}</p>
-            <Badge tone="info">{s.type}</Badge>
+            <p className="text-sm font-medium text-gray-900">
+              {d.typeDoc?.nom_en || d.typeDoc?.nom_ar || 'Document request'}
+            </p>
+            <Badge tone={docStatusTone(d.status)}>{d.status?.replace(/_/g, ' ')}</Badge>
+            {d.typeDoc?.categorie && <Badge tone="neutral">{d.typeDoc.categorie}</Badge>}
           </div>
-          <p className="text-xs text-gray-500 mt-1">Submitted: {formatDate(s.createdAt)}</p>
-          <p className="text-sm text-gray-700 mt-2 line-clamp-3">{s.message}</p>
+          <p className="text-xs text-gray-500 mt-1">
+            Requested: {formatDate(d.dateDemande)}
+            {d.dateTraitement ? ` · Processed: ${formatDate(d.dateTraitement)}` : ''}
+          </p>
+          {(d.description_en || d.description_ar) && (
+            <p className="text-sm text-gray-700 mt-2 line-clamp-3">
+              {d.description_en || d.description_ar}
+            </p>
+          )}
         </li>
       ))}
     </ul>

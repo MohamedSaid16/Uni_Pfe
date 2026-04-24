@@ -1,21 +1,6 @@
-import { Router } from "express";
-import { requireAuth, requireRole } from "../../middlewares/auth.middleware";
-import {
-  closeAffectationCampaignHandler,
-  createAffectationCampaignHandler,
-  listAffectationCampaignsHandler,
-  openAffectationCampaignHandler,
-  updateAffectationCampaignHandler,
-} from "./affectation.controller";
-
-const router = Router();
-
-const affectationAdminRoles = ["admin"];
-
-router.get("/campaigns", requireAuth, requireRole(affectationAdminRoles), listAffectationCampaignsHandler);
-router.post("/campaigns", requireAuth, requireRole(affectationAdminRoles), createAffectationCampaignHandler);
-router.patch("/campaigns/:id", requireAuth, requireRole(affectationAdminRoles), updateAffectationCampaignHandler);
-router.patch("/campaigns/:id/open", requireAuth, requireRole(affectationAdminRoles), openAffectationCampaignHandler);
-router.patch("/campaigns/:id/close", requireAuth, requireRole(affectationAdminRoles), closeAffectationCampaignHandler);
-
-export default router;
+/**
+ * Entry point for the affectation module — mounted under /api/v1/affectation in app.ts.
+ * The real routing tree is in ./routes/index.ts; this file exists so the import
+ * path in app.ts stays stable while the internal layout follows clean architecture.
+ */
+export { default } from "./routes";

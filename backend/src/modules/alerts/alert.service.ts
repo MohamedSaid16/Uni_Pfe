@@ -2,7 +2,22 @@ import { AlertType, Prisma } from "@prisma/client";
 import prisma from "../../config/database";
 import logger from "../../utils/logger";
 
-export type AlertTypeInput = AlertType | "MEETING" | "DECISION" | "REQUEST";
+export type AlertTypeInput =
+  | AlertType
+  | "MEETING"
+  | "DOCUMENT"
+  | "RECLAMATION"
+  | "JUSTIFICATION"
+  | "DECISION"
+  | "REQUEST";
+
+export type CreateAlertInput = {
+  userId: number;
+  type: AlertTypeInput;
+  title: string;
+  message: string;
+  relatedId?: number | null;
+};
 
 type AlertClient = typeof prisma | Prisma.TransactionClient;
 
@@ -10,6 +25,9 @@ const normalizeAlertType = (value: AlertTypeInput): AlertType => {
   const normalized = String(value || "").trim().toUpperCase();
   if (normalized === "MEETING") return AlertType.MEETING;
   if (normalized === "DECISION") return AlertType.DECISION;
+  if (["DOCUMENT", "RECLAMATION", "JUSTIFICATION", "REQUEST"].includes(normalized)) {
+    return AlertType.REQUEST;
+  }
   return AlertType.REQUEST;
 };
 
@@ -22,32 +40,51 @@ const normalizeLimit = (value?: number): number | undefined => {
 };
 
 export const createAlert = async (
-  userId: number,
-  title: string,
-  message: string,
-  type: AlertTypeInput,
+  input: CreateAlertInput,
   client: AlertClient = prisma
 ) => {
+  const userId = Number(input.userId);
   if (!Number.isInteger(userId) || userId <= 0) {
     throw new Error("A valid userId is required");
   }
 
-  const normalizedTitle = String(title || "").trim().slice(0, 255);
-  const normalizedMessage = String(message || "").trim();
+  const normalizedTitle = String(input.title || "").trim().slice(0, 255);
+  const baseMessage = String(input.message || "").trim();
+  const relatedId = Number(input.relatedId);
+  const normalizedRelatedId = Number.isInteger(relatedId) && relatedId > 0 ? relatedId : null;
+  const normalizedMessage = [
+    baseMessage,
+    normalizedRelatedId ? `Reference ID: ${normalizedRelatedId}` : null,
+  ]
+    .filter((entry): entry is string => Boolean(entry))
+    .join("\n");
 
   if (!normalizedTitle || !normalizedMessage) {
     throw new Error("Alert title and message are required");
   }
+
+  const normalizedType = normalizeAlertType(input.type);
+  console.log("[alerts] trigger", {
+    userId,
+    type: normalizedType,
+    title: normalizedTitle,
+    relatedId: normalizedRelatedId,
+  });
 
   const alert = await client.alert.create({
     data: {
       userId,
       title: normalizedTitle,
       message: normalizedMessage,
-      type: normalizeAlertType(type),
+      type: normalizedType,
     },
   });
 
+  console.log("[alerts] inserted", {
+    id: alert.id,
+    userId: alert.userId,
+    type: alert.type,
+  });
   logger.info(`Alert created for user=${userId}, alert=${alert.id}, type=${alert.type}`);
   return alert;
 };

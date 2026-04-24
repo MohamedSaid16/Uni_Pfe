@@ -1,3 +1,9 @@
+/*
+  PfeConfigView — settings-panel style CRUD for PFE system configuration.
+  Displayed as a list of key/value settings rows with inline editing.
+  Replaces window.confirm with a built-in confirmation banner.
+*/
+
 import React, { useState, useCallback } from 'react';
 import {
   Plus,
@@ -5,140 +11,372 @@ import {
   Edit2,
   CheckCircle2,
   AlertCircle,
+  X,
+  Loader2,
+  Settings2,
+  Key,
+  Hash,
+  Calendar,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import request from '../../services/api';
 
-const icons = {
-  plus: (p) => <Plus {...p} />,
-  trash: (p) => <Trash2 {...p} />,
-  edit: (p) => <Edit2 {...p} />,
-  check: (p) => <CheckCircle2 {...p} />,
-  alert: (p) => <AlertCircle {...p} />,
-};
+/* ── Helpers ────────────────────────────────────────────────── */
 
-/**
- * PfeConfigView — Admin-only configuration management component
- *
- * Displays and allows CRUD operations on PFE system configurations.
- * Fields map directly to PfeConfig schema:
- * - nom_config: Configuration name (unique, VarChar(100))
- * - valeur: Configuration value (VarChar(50))
- * - description_ar: Arabic description (Text, optional)
- * - description_en: English description (Text, optional)
- * - anneeUniversitaire: Academic year (VarChar(20))
- * - createdBy: Creator user ID (Int, optional)
- * - createdAt/updatedAt: Timestamps
- */
+function getCurrentAcademicYear() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const start = now.getMonth() + 1 >= 9 ? year : year - 1;
+  return `${start}/${start + 1}`;
+}
+
+/* ── Inline Confirm Banner ──────────────────────────────────── */
+
+function ConfirmBanner({ message, onConfirm, onCancel }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3">
+      <AlertCircle className="w-4 h-4 text-danger flex-shrink-0" />
+      <p className="flex-1 text-sm text-ink min-w-0">{message}</p>
+      <div className="flex gap-2 flex-shrink-0">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-lg border border-edge bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-200 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-surface hover:opacity-90 transition-opacity"
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Input field ─────────────────────────────────────────────── */
+
+function Field({ label, hint, required, children }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-xs font-semibold uppercase tracking-wide text-ink-secondary">
+        {label}
+        {required && <span className="ml-0.5 text-danger">*</span>}
+      </label>
+      {children}
+      {hint && <p className="text-[11px] text-ink-muted">{hint}</p>}
+    </div>
+  );
+}
+
+const inputCls =
+  'w-full rounded-xl border border-edge-subtle bg-control-bg px-3 py-2.5 text-sm text-ink placeholder-ink-muted outline-none transition-all focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:bg-surface-200 disabled:text-ink-muted';
+
+/* ── Config Form ─────────────────────────────────────────────── */
+
+function ConfigForm({ initial, onSubmit, onCancel, submitting, formError }) {
+  const [data, setData] = useState(
+    initial || {
+      nom_config: '',
+      valeur: '',
+      description_ar: '',
+      description_en: '',
+      anneeUniversitaire: getCurrentAcademicYear(),
+    }
+  );
+  const isEditing = !!initial?.id;
+
+  const set = (key, value) => setData((p) => ({ ...p, [key]: value }));
+
+  return (
+    <div className="rounded-2xl border border-edge bg-surface p-6 shadow-card space-y-5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="rounded-lg bg-brand/10 p-1.5">
+            <Settings2 className="w-4 h-4 text-brand" />
+          </div>
+          <h3 className="text-sm font-semibold text-ink">
+            {isEditing ? 'Edit Configuration' : 'New Configuration'}
+          </h3>
+        </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-lg p-1.5 text-ink-muted hover:bg-surface-200 hover:text-ink transition-colors"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      {formError && (
+        <div className="flex items-center gap-2 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          {formError}
+        </div>
+      )}
+
+      <form
+        onSubmit={(e) => { e.preventDefault(); onSubmit(data, isEditing); }}
+        className="space-y-4"
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Configuration Key" required hint="Unique system identifier — cannot be changed after creation.">
+            <div className="relative">
+              <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-muted" />
+              <input
+                type="text"
+                value={data.nom_config}
+                onChange={(e) => set('nom_config', e.target.value)}
+                placeholder="e.g., max_groups_per_project"
+                disabled={isEditing}
+                required
+                className={`${inputCls} pl-8`}
+              />
+            </div>
+          </Field>
+
+          <Field label="Value" required hint="Up to 50 characters.">
+            <div className="relative">
+              <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-muted" />
+              <input
+                type="text"
+                value={data.valeur}
+                onChange={(e) => set('valeur', e.target.value.slice(0, 50))}
+                placeholder="e.g., 3"
+                maxLength={50}
+                required
+                className={`${inputCls} pl-8`}
+              />
+            </div>
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Description (Arabic)">
+            <textarea
+              value={data.description_ar}
+              onChange={(e) => set('description_ar', e.target.value)}
+              placeholder="وصف اختياري..."
+              rows={3}
+              className={`${inputCls} resize-none`}
+            />
+          </Field>
+          <Field label="Description (English)">
+            <textarea
+              value={data.description_en}
+              onChange={(e) => set('description_en', e.target.value)}
+              placeholder="Optional English description..."
+              rows={3}
+              className={`${inputCls} resize-none`}
+            />
+          </Field>
+        </div>
+
+        {!isEditing && (
+          <Field label="Academic Year" hint="Format: 2025/2026">
+            <div className="relative">
+              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-muted" />
+              <input
+                type="text"
+                value={data.anneeUniversitaire}
+                onChange={(e) => set('anneeUniversitaire', e.target.value)}
+                placeholder={getCurrentAcademicYear()}
+                className={`${inputCls} pl-8`}
+              />
+            </div>
+          </Field>
+        )}
+
+        <div className="flex justify-end gap-3 pt-2 border-t border-edge-subtle">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-xl border border-edge bg-surface px-4 py-2 text-sm font-medium text-ink hover:bg-surface-200 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-surface hover:opacity-90 transition-opacity disabled:opacity-60"
+          >
+            {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+            {submitting ? 'Saving…' : isEditing ? 'Update' : 'Create'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/* ── Config Row ──────────────────────────────────────────────── */
+
+function ConfigRow({ config, onEdit, onDelete, disabled }) {
+  const [expanded, setExpanded] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const hasDesc = !!(config.description_ar || config.description_en);
+
+  return (
+    <div className="rounded-2xl border border-edge bg-surface shadow-card transition-all duration-200 hover:shadow-card-hover overflow-hidden">
+      {/* Main row */}
+      <div className="flex items-center gap-4 px-5 py-4">
+        {/* Key icon */}
+        <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-surface-200 flex items-center justify-center">
+          <Key className="w-4 h-4 text-ink-muted" />
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-ink font-mono">
+              {config.nom_config}
+            </span>
+            <span className="rounded-lg bg-brand/10 px-2.5 py-0.5 text-xs font-mono font-semibold text-brand">
+              {config.valeur}
+            </span>
+            {config.anneeUniversitaire && (
+              <span className="rounded-full bg-surface-200 px-2.5 py-0.5 text-xs text-ink-tertiary">
+                {config.anneeUniversitaire}
+              </span>
+            )}
+          </div>
+          {!expanded && hasDesc && (
+            <p className="mt-0.5 text-xs text-ink-tertiary truncate">
+              {config.description_en || config.description_ar}
+            </p>
+          )}
+          {config.createdAt && (
+            <p className="mt-0.5 text-[11px] text-ink-muted">
+              Created {new Date(config.createdAt).toLocaleDateString()}
+            </p>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {hasDesc && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="rounded-lg p-2 text-ink-muted hover:bg-surface-200 hover:text-ink transition-colors"
+              title={expanded ? 'Collapse' : 'Expand'}
+            >
+              {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onEdit(config)}
+            disabled={disabled}
+            className="rounded-lg p-2 text-ink-muted hover:bg-surface-200 hover:text-ink transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Edit"
+          >
+            <Edit2 className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            className="rounded-lg p-2 text-ink-muted hover:bg-danger/10 hover:text-danger transition-colors"
+            title="Delete"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Expanded descriptions */}
+      {expanded && hasDesc && (
+        <div className="border-t border-edge-subtle px-5 py-3 bg-surface-200/40">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {config.description_ar && (
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted mb-1">Arabic</p>
+                <p className="text-sm text-ink-secondary" dir="rtl">{config.description_ar}</p>
+              </div>
+            )}
+            {config.description_en && (
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted mb-1">English</p>
+                <p className="text-sm text-ink-secondary">{config.description_en}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Confirm delete */}
+      {confirmDelete && (
+        <div className="border-t border-edge-subtle px-5 py-3 bg-surface-200/40">
+          <ConfirmBanner
+            message={`Delete "${config.nom_config}"? This cannot be undone.`}
+            onConfirm={() => { setConfirmDelete(false); onDelete(config.id); }}
+            onCancel={() => setConfirmDelete(false)}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Main Component ──────────────────────────────────────────── */
+
 export default function PfeConfigView({ configs = [], loading, error, onRefresh }) {
-  const [editingId, setEditingId] = useState(null);
-  const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({
-    nom_config: '',
-    valeur: '',
-    description_ar: '',
-    description_en: '',
-    anneeUniversitaire: '',
-  });
+  const [mode, setMode] = useState(null); // null | 'create' | { ...editingConfig }
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
+  const [toast, setToast] = useState(null); // { type: 'success'|'error', message }
 
-  // Get current academic year for default
-  const getCurrentAcademicYear = useCallback(() => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
-    const startYear = month >= 9 ? year : year - 1;
-    return `${startYear}/${startYear + 1}`;
+  const showToast = (type, message) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 3500);
+  };
+
+  const handleCancel = useCallback(() => {
+    setMode(null);
+    setFormError('');
   }, []);
 
-  // Reset form
-  const resetForm = useCallback(() => {
-    setFormData({
-      nom_config: '',
-      valeur: '',
-      description_ar: '',
-      description_en: '',
-      anneeUniversitaire: getCurrentAcademicYear(),
-    });
-    setEditingId(null);
-    setFormError('');
-    setShowForm(false);
-  }, [getCurrentAcademicYear]);
-
-  // Initialize form for new entry
-  const handleAddNew = useCallback(() => {
-    setFormData({
-      nom_config: '',
-      valeur: '',
-      description_ar: '',
-      description_en: '',
-      anneeUniversitaire: getCurrentAcademicYear(),
-    });
-    setEditingId(null);
-    setFormError('');
-    setShowForm(true);
-  }, [getCurrentAcademicYear]);
-
-  // Initialize form for editing
   const handleEdit = useCallback((config) => {
-    setFormData({
-      nom_config: config.nom_config || '',
-      valeur: config.valeur || '',
-      description_ar: config.description_ar || '',
-      description_en: config.description_en || '',
-      anneeUniversitaire: config.anneeUniversitaire || '',
-    });
-    setEditingId(config.id);
+    setMode(config);
     setFormError('');
-    setShowForm(true);
   }, []);
 
-  // Handle form submission (create or update)
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (data, isEditing) => {
     setFormError('');
-    setSuccessMessage('');
-
-    // Validation
-    if (!formData.nom_config?.trim()) {
-      setFormError('Configuration name is required');
-      return;
-    }
-    if (!formData.valeur?.trim()) {
-      setFormError('Configuration value is required');
-      return;
-    }
+    if (!data.nom_config?.trim()) { setFormError('Configuration key is required'); return; }
+    if (!data.valeur?.trim()) { setFormError('Value is required'); return; }
 
     setSubmitting(true);
     try {
-      if (editingId) {
-        // Update existing configuration
-        await request(`/api/v1/pfe/config/${editingId}`, {
+      if (isEditing) {
+        await request(`/api/v1/pfe/config/${mode.id}`, {
           method: 'PATCH',
           body: JSON.stringify({
-            valeur: formData.valeur.trim(),
-            description_ar: formData.description_ar?.trim() || null,
-            description_en: formData.description_en?.trim() || null,
+            valeur: data.valeur.trim(),
+            description_ar: data.description_ar?.trim() || null,
+            description_en: data.description_en?.trim() || null,
           }),
         });
-        setSuccessMessage('Configuration updated successfully');
+        showToast('success', 'Configuration updated successfully');
       } else {
-        // Create new configuration
         await request('/api/v1/pfe/config', {
           method: 'POST',
           body: JSON.stringify({
-            nom_config: formData.nom_config.trim(),
-            valeur: formData.valeur.trim(),
-            description_ar: formData.description_ar?.trim() || null,
-            description_en: formData.description_en?.trim() || null,
-            anneeUniversitaire: formData.anneeUniversitaire?.trim() || getCurrentAcademicYear(),
+            nom_config: data.nom_config.trim(),
+            valeur: data.valeur.trim(),
+            description_ar: data.description_ar?.trim() || null,
+            description_en: data.description_en?.trim() || null,
+            anneeUniversitaire: data.anneeUniversitaire?.trim() || getCurrentAcademicYear(),
           }),
         });
-        setSuccessMessage('Configuration created successfully');
+        showToast('success', 'Configuration created successfully');
       }
-
-      resetForm();
+      setMode(null);
       onRefresh();
     } catch (err) {
       setFormError(err?.message || 'Failed to save configuration');
@@ -147,247 +385,133 @@ export default function PfeConfigView({ configs = [], loading, error, onRefresh 
     }
   };
 
-  // Handle delete
-  const handleDelete = async (configId, configName) => {
-    if (!window.confirm(`Are you sure you want to delete "${configName}"?`)) {
-      return;
-    }
-
+  const handleDelete = async (configId) => {
     try {
-      await request(`/api/v1/pfe/config/${configId}`, {
-        method: 'DELETE',
-      });
-      setSuccessMessage('Configuration deleted successfully');
+      await request(`/api/v1/pfe/config/${configId}`, { method: 'DELETE' });
+      showToast('success', 'Configuration deleted');
       onRefresh();
     } catch (err) {
-      alert('Failed to delete configuration: ' + err.message);
+      showToast('error', `Delete failed: ${err?.message || 'Unknown error'}`);
     }
   };
 
   const allConfigs = Array.isArray(configs) ? configs : [];
 
   return (
-    <div className="space-y-6">
-      {/* Header Section */}
-      <section className="rounded-3xl border border-edge bg-surface p-6 shadow-card">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-brand">
-              System Configuration
-            </p>
-            <h2 className="mt-2 text-xl font-bold tracking-tight text-ink">
-              PFE Configuration
-            </h2>
-            <p className="mt-1 text-sm text-ink-secondary">
-              Manage PFE system settings and configuration parameters ({allConfigs.length} items)
-            </p>
-          </div>
+    <div className="space-y-4">
+      {/* Toast */}
+      {toast && (
+        <div
+          className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm transition-all ${
+            toast.type === 'success'
+              ? 'border-success/30 bg-success/10 text-success'
+              : 'border-danger/30 bg-danger/10 text-danger'
+          }`}
+        >
+          {toast.type === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+          ) : (
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          )}
+          <span className="flex-1">{toast.message}</span>
           <button
-            onClick={handleAddNew}
-            disabled={showForm}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand text-surface font-medium text-sm transition-all hover:bg-brand-hover disabled:bg-surface-200 disabled:text-ink-muted"
+            type="button"
+            onClick={() => setToast(null)}
+            className="text-current opacity-60 hover:opacity-100"
           >
-            <icons.plus className="w-4 h-4" />
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* API error */}
+      {error && (
+        <div className="flex items-center gap-3 rounded-2xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          {error}
+        </div>
+      )}
+
+      {/* Add button (shown when no form is open) */}
+      {!mode && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setMode('create')}
+            className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-surface shadow-sm hover:opacity-90 transition-opacity"
+          >
+            <Plus className="w-4 h-4" />
             Add Configuration
           </button>
         </div>
-      </section>
-
-      {/* Success Message */}
-      {successMessage && (
-        <div className="rounded-2xl border border-success/50 bg-success/10 p-4 text-sm text-success flex items-start gap-3">
-          <icons.check className="w-5 h-5 flex-shrink-0 mt-0.5" />
-          <div>{successMessage}</div>
-        </div>
       )}
 
-      {/* Error Message */}
-      {error && (
-        <div className="rounded-2xl border border-danger/50 bg-danger/10 p-4 text-sm text-danger flex items-start gap-3">
-          <icons.alert className="w-5 h-5 flex-shrink-0 mt-0.5" />
-          <div>{error}</div>
-        </div>
+      {/* Form */}
+      {mode && (
+        <ConfigForm
+          initial={mode === 'create' ? null : mode}
+          onSubmit={handleSubmit}
+          onCancel={handleCancel}
+          submitting={submitting}
+          formError={formError}
+        />
       )}
 
-      {/* Form Section */}
-      {showForm && (
-        <section className="rounded-3xl border border-edge bg-surface p-6 shadow-card">
-          <h3 className="text-lg font-semibold text-ink mb-4">
-            {editingId ? 'Edit Configuration' : 'New Configuration'}
-          </h3>
-
-          {formError && (
-            <div className="rounded-lg border border-danger/50 bg-danger/10 p-3 mb-4 text-sm text-danger">
-              {formError}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Configuration Name */}
-            <div>
-              <label className="block text-sm font-medium text-ink mb-1">
-                Configuration Name *
-              </label>
-              <input
-                type="text"
-                disabled={editingId} // Don't allow editing the unique name
-                value={formData.nom_config}
-                onChange={(e) => setFormData({ ...formData, nom_config: e.target.value })}
-                placeholder="e.g., max_groups_per_project"
-                className="w-full px-3 py-2 rounded-lg border border-edge bg-surface-200 text-ink placeholder-ink-muted text-sm focus:outline-none focus:ring-2 focus:ring-brand disabled:bg-surface-100 disabled:text-ink-muted"
-              />
-              <p className="mt-1 text-xs text-ink-tertiary">Unique identifier for this configuration</p>
-            </div>
-
-            {/* Configuration Value */}
-            <div>
-              <label className="block text-sm font-medium text-ink mb-1">
-                Configuration Value *
-              </label>
-              <input
-                type="text"
-                value={formData.valeur}
-                onChange={(e) => setFormData({ ...formData, valeur: e.target.value.substring(0, 50) })}
-                placeholder="e.g., 3"
-                maxLength={50}
-                className="w-full px-3 py-2 rounded-lg border border-edge bg-surface-200 text-ink placeholder-ink-muted text-sm focus:outline-none focus:ring-2 focus:ring-brand"
-              />
-              <p className="mt-1 text-xs text-ink-tertiary">Maximum 50 characters</p>
-            </div>
-
-            {/* Description (Arabic) */}
-            <div>
-              <label className="block text-sm font-medium text-ink mb-1">
-                Description (Arabic)
-              </label>
-              <textarea
-                value={formData.description_ar}
-                onChange={(e) => setFormData({ ...formData, description_ar: e.target.value })}
-                placeholder="Optional Arabic description..."
-                rows={3}
-                className="w-full px-3 py-2 rounded-lg border border-edge bg-surface-200 text-ink placeholder-ink-muted text-sm focus:outline-none focus:ring-2 focus:ring-brand resize-vertical"
-              />
-            </div>
-
-            {/* Description (English) */}
-            <div>
-              <label className="block text-sm font-medium text-ink mb-1">
-                Description (English)
-              </label>
-              <textarea
-                value={formData.description_en}
-                onChange={(e) => setFormData({ ...formData, description_en: e.target.value })}
-                placeholder="Optional English description..."
-                rows={3}
-                className="w-full px-3 py-2 rounded-lg border border-edge bg-surface-200 text-ink placeholder-ink-muted text-sm focus:outline-none focus:ring-2 focus:ring-brand resize-vertical"
-              />
-            </div>
-
-            {/* Academic Year */}
-            {!editingId && (
-              <div>
-                <label className="block text-sm font-medium text-ink mb-1">
-                  Academic Year
-                </label>
-                <input
-                  type="text"
-                  value={formData.anneeUniversitaire}
-                  onChange={(e) => setFormData({ ...formData, anneeUniversitaire: e.target.value })}
-                  placeholder={getCurrentAcademicYear()}
-                  className="w-full px-3 py-2 rounded-lg border border-edge bg-surface-200 text-ink placeholder-ink-muted text-sm focus:outline-none focus:ring-2 focus:ring-brand"
-                />
-                <p className="mt-1 text-xs text-ink-tertiary">Format: 2025/2026</p>
-              </div>
-            )}
-
-            {/* Form Actions */}
-            <div className="flex gap-3 justify-end pt-4 border-t border-edge-subtle">
-              <button
-                type="button"
-                onClick={resetForm}
-                className="px-4 py-2 rounded-lg border border-edge text-ink font-medium text-sm transition-all hover:bg-surface-200"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="px-4 py-2 rounded-lg bg-brand text-surface font-medium text-sm transition-all hover:bg-brand-hover disabled:bg-surface-200 disabled:text-ink-muted"
-              >
-                {submitting ? 'Saving...' : editingId ? 'Update' : 'Create'}
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
-
-      {/* Configurations List */}
+      {/* List */}
       {loading ? (
-        <div className="rounded-3xl border border-dashed border-edge bg-surface p-8 text-center text-sm text-ink-secondary">
-          Loading configurations...
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="rounded-2xl border border-edge bg-surface px-5 py-4 animate-pulse"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-9 h-9 rounded-xl bg-surface-300" />
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-4 w-40 rounded bg-surface-300" />
+                    <div className="h-4 w-14 rounded-lg bg-surface-300" />
+                  </div>
+                  <div className="h-3 w-48 rounded bg-surface-300" />
+                </div>
+                <div className="flex gap-1">
+                  <div className="h-8 w-8 rounded-lg bg-surface-300" />
+                  <div className="h-8 w-8 rounded-lg bg-surface-300" />
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       ) : allConfigs.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-edge bg-surface p-8 text-center text-sm text-ink-secondary">
-          <p className="mb-3">No configurations found</p>
-          <button
-            onClick={handleAddNew}
-            className="text-brand font-medium hover:underline text-sm"
-          >
-            Create the first configuration
-          </button>
+        <div className="rounded-2xl border border-dashed border-edge bg-surface p-10 text-center">
+          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-surface-200">
+            <Settings2 className="w-5 h-5 text-ink-muted" />
+          </div>
+          <p className="text-sm font-medium text-ink">No configurations yet</p>
+          <p className="mt-0.5 text-xs text-ink-tertiary">
+            Add your first system parameter to get started.
+          </p>
+          {!mode && (
+            <button
+              type="button"
+              onClick={() => setMode('create')}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-surface hover:opacity-90 transition-opacity"
+            >
+              <Plus className="w-4 h-4" />
+              Add first configuration
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
           {allConfigs.map((config) => (
-            <div
+            <ConfigRow
               key={config.id}
-              className="rounded-2xl border border-edge bg-surface p-4 shadow-card hover:shadow-card-hover transition-shadow"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-base font-semibold text-ink truncate">
-                    {config.nom_config}
-                  </h3>
-                  <p className="mt-1 text-sm text-ink-secondary">
-                    <span className="font-mono bg-surface-200 px-2 py-1 rounded text-xs">
-                      {config.valeur}
-                    </span>
-                  </p>
-                  {(config.description_ar || config.description_en) && (
-                    <p className="mt-2 text-sm text-ink-tertiary">
-                      {config.description_ar || config.description_en}
-                    </p>
-                  )}
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-ink-muted">
-                    <span>Year: {config.anneeUniversitaire}</span>
-                    {config.createdAt && (
-                      <span>
-                        Created: {new Date(config.createdAt).toLocaleDateString()}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex gap-2 flex-shrink-0">
-                  <button
-                    onClick={() => handleEdit(config)}
-                    disabled={showForm}
-                    className="p-2 rounded-lg border border-edge text-ink-secondary hover:text-ink hover:bg-surface-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Edit configuration"
-                  >
-                    <icons.edit className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(config.id, config.nom_config)}
-                    className="p-2 rounded-lg border border-danger/30 text-danger hover:bg-danger/10 transition-all"
-                    title="Delete configuration"
-                  >
-                    <icons.trash className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </div>
+              config={config}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              disabled={!!mode}
+            />
           ))}
         </div>
       )}

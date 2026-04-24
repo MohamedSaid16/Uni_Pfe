@@ -404,6 +404,12 @@ export const adminPanelAPI = {
   getOverview: () =>
     request('/api/v1/admin/dashboard/overview'),
 
+  getAnalytics: () =>
+    request('/api/v1/admin/analytics'),
+
+  getUserStats: (userId) =>
+    request(`/api/v1/admin/user/${userId}/stats`),
+
   getAuditLogs: (params = {}) =>
     request(`/api/v1/admin/audit-logs${buildQueryString(params)}`),
 
@@ -670,6 +676,92 @@ export const disciplinaryCatalogAPI = {
     request(`/api/v1/disciplinary/decisions/${id}`, {
       method: 'DELETE',
     }),
+};
+
+/* ── Affectation API ────────────────────────────────────────── */
+
+export const affectationAPI = {
+  // ── Campaigns ──────────────────────────────────────────────
+  listCampaigns: (filters = {}) =>
+    request(`/api/v1/affectation/campaigns${buildQueryString(filters)}`),
+
+  getCampaign: (id) =>
+    request(`/api/v1/affectation/campaigns/${id}`),
+
+  createCampaign: (payload) =>
+    request('/api/v1/affectation/campaigns', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateCampaign: (id, payload) =>
+    request(`/api/v1/affectation/campaigns/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteCampaign: (id) =>
+    request(`/api/v1/affectation/campaigns/${id}`, {
+      method: 'DELETE',
+    }),
+
+  openCampaign: (id) =>
+    request(`/api/v1/affectation/campaigns/${id}/open`, {
+      method: 'PATCH',
+    }),
+
+  closeCampaign: (id) =>
+    request(`/api/v1/affectation/campaigns/${id}/close`, {
+      method: 'PATCH',
+    }),
+
+  runAlgorithm: (id) =>
+    request(`/api/v1/affectation/campaigns/${id}/run`, {
+      method: 'POST',
+    }),
+
+  getCampaignVoeux: (id) =>
+    request(`/api/v1/affectation/campaigns/${id}/voeux`),
+
+  getCampaignResults: (id) =>
+    request(`/api/v1/affectation/campaigns/${id}/results`),
+
+  getCampaignStats: (id) =>
+    request(`/api/v1/affectation/campaigns/${id}/stats`),
+
+  // ── Specialite-campaign links ──────────────────────────────
+  linkSpecialite: (campaignId, payload) =>
+    request(`/api/v1/affectation/campaigns/${campaignId}/specialites`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateSpecialiteQuota: (linkId, quota) =>
+    request(`/api/v1/affectation/specialites/${linkId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ quota }),
+    }),
+
+  unlinkSpecialite: (linkId) =>
+    request(`/api/v1/affectation/specialites/${linkId}`, {
+      method: 'DELETE',
+    }),
+
+  // ── Student endpoints ──────────────────────────────────────
+  listOpenCampaignsForStudent: () =>
+    request('/api/v1/affectation/campaigns/open'),
+
+  submitVoeux: (payload) =>
+    request('/api/v1/affectation/voeux', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getMyVoeux: (campagneId) =>
+    request(`/api/v1/affectation/voeux/me${buildQueryString({ campagneId })}`),
+
+  getMyAffectation: () =>
+    request('/api/v1/affectation/voeux/me/affectation'),
 };
 
 export default request;

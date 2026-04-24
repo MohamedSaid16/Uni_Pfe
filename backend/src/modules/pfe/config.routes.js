@@ -27,37 +27,47 @@
 
 const express = require('express');
 const configController = require('./config.controller');
+const { requireAuth } = require('../../middlewares/auth.middleware');
 
 const router = express.Router();
 
-// Admin-only access control middleware
+// Admin-only access control middleware. Runs after requireAuth so req.user is populated.
 const adminOnly = (req, res, next) => {
-  const userRoles = req.user?.roles || [];
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+    });
+  }
+  const userRoles = req.user.roles || [];
   if (!userRoles.includes('admin')) {
     return res.status(403).json({
       success: false,
-      error: 'Access denied: Admin role required',
+      error: { code: 'FORBIDDEN', message: 'Admin role required' },
     });
   }
   next();
 };
 
+// Every /pfe/config route: authenticate first, then check admin role.
+router.use(requireAuth, adminOnly);
+
 // Routes
 
 // GET all PFE configurations (admin only)
-router.get('/', adminOnly, (req, res) => configController.getAll(req, res));
+router.get('/', (req, res) => configController.getAll(req, res));
 
 // GET a single configuration by ID (admin only)
-router.get('/:id', adminOnly, (req, res) => configController.getById(req, res));
+router.get('/:id', (req, res) => configController.getById(req, res));
 
 // CREATE a new configuration (admin only)
-router.post('/', adminOnly, (req, res) => configController.create(req, res));
+router.post('/', (req, res) => configController.create(req, res));
 
 // UPDATE a configuration (admin only)
-router.put('/:id', adminOnly, (req, res) => configController.update(req, res));
-router.patch('/:id', adminOnly, (req, res) => configController.update(req, res));
+router.put('/:id', (req, res) => configController.update(req, res));
+router.patch('/:id', (req, res) => configController.update(req, res));
 
 // DELETE a configuration (admin only)
-router.delete('/:id', adminOnly, (req, res) => configController.delete(req, res));
+router.delete('/:id', (req, res) => configController.delete(req, res));
 
 module.exports = router;

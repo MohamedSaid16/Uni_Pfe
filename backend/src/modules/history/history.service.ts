@@ -25,7 +25,7 @@ const statusFromConseil = (status: string | null | undefined): string => {
 };
 
 /**
- * Student history: disciplinary councils + submissions (reclamations, justifications, unified submissions).
+ * Student history: disciplinary councils + reclamations + justifications.
  * `userId` is the User.id (not etudiant.id) — per spec.
  */
 export const getStudentHistory = async (userId: number) => {
@@ -45,11 +45,10 @@ export const getStudentHistory = async (userId: number) => {
       disciplinaryCouncils: [],
       reclamations: [],
       justifications: [],
-      submissions: [],
     };
   }
 
-  const [dossiers, reclamations, justifications, submissions] = await Promise.all([
+  const [dossiers, reclamations, justifications] = await Promise.all([
     prisma.dossierDisciplinaire.findMany({
       where: { etudiantId: etudiant.id },
       orderBy: { createdAt: "desc" },
@@ -71,10 +70,6 @@ export const getStudentHistory = async (userId: number) => {
       where: { etudiantId: etudiant.id },
       orderBy: { createdAt: "desc" },
       include: { type: { select: { nom_ar: true, nom_en: true } } },
-    }),
-    prisma.submission.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
     }),
   ]);
 
@@ -107,12 +102,11 @@ export const getStudentHistory = async (userId: number) => {
     })),
     reclamations,
     justifications,
-    submissions,
   };
 };
 
 /**
- * Teacher history: reported students (from disciplinary dossiers) + supervised PFE projects with group members.
+ * Teacher history: reported students (from disciplinary dossiers) + supervised PFE projects with group members + document requests.
  */
 export const getTeacherHistory = async (userId: number) => {
   const enseignant = await prisma.enseignant.findUnique({
@@ -129,11 +123,11 @@ export const getTeacherHistory = async (userId: number) => {
       user: { id: userId },
       reportedStudents: [],
       pfeProjects: [],
-      submissions: [],
+      documents: [],
     };
   }
 
-  const [dossiers, pfeSujets, submissions] = await Promise.all([
+  const [dossiers, pfeSujets, documentRequests] = await Promise.all([
     prisma.dossierDisciplinaire.findMany({
       where: { enseignantSignalant: enseignant.id },
       orderBy: { createdAt: "desc" },
@@ -171,9 +165,12 @@ export const getTeacherHistory = async (userId: number) => {
         },
       },
     }),
-    prisma.submission.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
+    prisma.documentRequest.findMany({
+      where: { enseignantId: enseignant.id },
+      orderBy: { dateDemande: "desc" },
+      include: {
+        typeDoc: { select: { nom_ar: true, nom_en: true, categorie: true } },
+      },
     }),
   ]);
 
@@ -230,6 +227,15 @@ export const getTeacherHistory = async (userId: number) => {
         })),
       })),
     })),
-    submissions,
+    documents: documentRequests.map((d) => ({
+      id: d.id,
+      typeDoc: d.typeDoc,
+      description_ar: d.description_ar,
+      description_en: d.description_en,
+      dateDemande: d.dateDemande,
+      status: d.status,
+      dateTraitement: d.dateTraitement,
+      documentUrl: d.documentUrl,
+    })),
   };
 };

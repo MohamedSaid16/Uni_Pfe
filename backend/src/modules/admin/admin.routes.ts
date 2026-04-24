@@ -6,7 +6,9 @@ import {
   deleteAdminDocumentHandler,
   deleteAdminUserHandler,
   downloadAdminDocumentHandler,
+  getAdminAnalyticsHandler,
   getAdminDashboardOverviewHandler,
+  getAdminUserStatsHandler,
   getUniversalHistoryHandler,
   listAdminAnnouncementsHandler,
   listAdminDocumentsHandler,
@@ -52,6 +54,8 @@ const announcementUpload = multer({
 router.use(requireAuth, requireRole(["admin"]));
 
 router.get("/dashboard/overview", requireAnyPermission(["users:manage"]), getAdminDashboardOverviewHandler);
+router.get("/analytics", requireAnyPermission(["users:manage"]), getAdminAnalyticsHandler);
+router.get("/user/:id/stats", requireAnyPermission(["users:manage"]), getAdminUserStatsHandler);
 router.get("/audit-logs", requireAnyPermission(["users:manage", "reclamations:manage:global"]), listAdminAuditLogsHandler);
 
 router.get("/users", requireAnyPermission(["users:manage"]), listAdminUsersHandler);

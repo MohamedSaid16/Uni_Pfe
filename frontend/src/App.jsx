@@ -38,6 +38,9 @@ import RemiseCopie from './pages/RemiseCopie';
 import StudentNotesPage from './pages/StudentNotesPage';
 import StudentSpecialiteChoicePage from './pages/StudentSpecialiteChoicePage';
 import AdminGroupsPage from './pages/admin/Groups';
+import AdminAffectationPage from './pages/admin/AdminAffectationPage';
+import AdminAnalyticsPage from './pages/admin/AdminAnalyticsPage';
+import AdminUserStatsPage from './pages/admin/AdminUserStatsPage';
 import StudentHistoryPage from './pages/StudentHistoryPage';
 import TeacherHistoryPage from './pages/TeacherHistoryPage';
 import AdminHistoryPage from './pages/AdminHistoryPage';
@@ -216,7 +219,14 @@ function App() {
               <Route path="/dashboard/projects/defense" element={<ProtectedRoute><DashboardLayout><DefensePage /></DashboardLayout></ProtectedRoute>} />
               <Route path="/dashboard/pfe-workspace" element={<ProtectedRoute><DashboardLayout><PFEWorkspacePage /></DashboardLayout></ProtectedRoute>} />
               <Route path="/dashboard/notes" element={<ProtectedRoute><DashboardLayout><StudentNotesPage /></DashboardLayout></ProtectedRoute>} />
-              <Route path="/dashboard/specialite-choice" element={<ProtectedRoute><DashboardLayout><StudentSpecialiteChoicePage /></DashboardLayout></ProtectedRoute>} />
+              <Route
+                path="/dashboard/specialite-choice"
+                element={
+                  <ProtectedRoute allowedRoles={['etudiant', 'student']}>
+                    <DashboardLayout><StudentSpecialiteChoicePage /></DashboardLayout>
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="/dashboard/requests"
                 element={
@@ -306,6 +316,30 @@ function App() {
                     accessMode="any"
                   >
                     <DashboardLayout><AdminAcademicAssignmentsPage /></DashboardLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/dashboard/admin/affectation"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <DashboardLayout><AdminAffectationPage /></DashboardLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/dashboard/admin/analytics"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']} requiredPermissions={['users:manage']} accessMode="any">
+                    <DashboardLayout><AdminAnalyticsPage /></DashboardLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/dashboard/admin/user/:id"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']} requiredPermissions={['users:manage']} accessMode="any">
+                    <DashboardLayout><AdminUserStatsPage /></DashboardLayout>
                   </ProtectedRoute>
                 }
               />

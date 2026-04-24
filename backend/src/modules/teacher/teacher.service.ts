@@ -12,6 +12,7 @@ import prisma from "../../config/database";
 import { changePassword } from "../auth/auth.service";
 import { writeAuditLogSafe } from "../../shared/audit-log.service";
 import { appendRequestWorkflowEvent } from "../requests/workflow.service";
+import { buildTeacherStatistics } from "../dashboard/statistics.service";
 
 export type TeacherAnnouncementStatus = "draft" | "published" | "archived" | "scheduled";
 export type TeacherReclamationStatus = "pending" | "approved" | "rejected";
@@ -719,9 +720,14 @@ export const getTeacherDashboard = async (userId: number) => {
     ? { etudiant: { promoId: { in: promoIds } } }
     : { id: -1 };
 
-  const [announcementCount, reclamationCount, recentAnnouncements, recentReclamations] = await Promise.all([
-    prisma.annonce.count({ where: { auteurId: userId } }),
-    prisma.reclamation.count({ where: reclamationWhere }),
+  const distinctModuleIds = new Set(context.courses.map((course) => course.moduleId));
+
+  const [summary, recentAnnouncements, recentReclamations] = await Promise.all([
+    buildTeacherStatistics({
+      userId,
+      promoIds,
+      coursesCount: distinctModuleIds.size,
+    }),
     prisma.annonce.findMany({
       where: { auteurId: userId },
       include: {
@@ -785,10 +791,7 @@ export const getTeacherDashboard = async (userId: number) => {
   });
 
   return {
-    summary: {
-      announcements: announcementCount,
-      reclamations: reclamationCount,
-    },
+    summary,
     quickActions: [
       {
         id: "create-announcement",

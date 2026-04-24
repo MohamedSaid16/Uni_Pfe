@@ -656,7 +656,7 @@ export const createConseilHandler = async (req: AuthRequest, res: Response, next
       });
 
       for (const dossierId of dossierIdList) {
-        await createMeetingScheduledAlert(dossierId, tx);
+        await createMeetingScheduledAlert({ dossierId, adminUserId: req.user?.id ?? null }, tx);
       }
 
       return tx.conseilDisciplinaire.findUnique({

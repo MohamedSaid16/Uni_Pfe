@@ -56,9 +56,11 @@ export interface LoginResponse {
 }
 
 export class AuthServiceError extends Error {
-  constructor(message: string) {
+  code?: string;
+  constructor(message: string, code?: string) {
     super(message);
     this.name = "AuthServiceError";
+    this.code = code;
   }
 }
 
@@ -199,6 +201,10 @@ export const registerUser = async (data: RegisterInput): Promise<LoginResponse> 
 
 // ── Login ───────────────────────────────────────────────────────
 
+const LOCK_THRESHOLD = 5;
+const LOCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+const isDev = process.env.NODE_ENV !== "production";
+
 export const loginUser = async (email: string, password: string): Promise<LoginResponse> => {
   const user = await prisma.user.findUnique({ where: { email } });
 
@@ -206,33 +212,48 @@ export const loginUser = async (email: string, password: string): Promise<LoginR
     throw new AuthServiceError("Invalid email or password");
   }
 
-  // Check account status
+  // Temporary brute-force lockout check (bypassed in development)
+  if (!isDev && user.lockUntil && user.lockUntil > new Date()) {
+    const minutesLeft = Math.ceil((user.lockUntil.getTime() - Date.now()) / 60000);
+    throw new AuthServiceError(
+      `Account temporarily locked due to failed login attempts. Try again in ${minutesLeft} minute(s).`,
+      "ACCOUNT_LOCKED"
+    );
+  }
+
+  // Manual suspension / inactive — separate from brute-force lockout
   if (user.status !== "active") {
-    throw new AuthServiceError("Account is suspended or inactive");
+    const message =
+      user.status === "suspended"
+        ? "Account has been suspended. Please contact an administrator."
+        : "Account is inactive.";
+    throw new AuthServiceError(message);
   }
 
   // Verify password
   const isValidPassword = await comparePasswords(password, user.password);
 
   if (!isValidPassword) {
-    // Increment login attempts (schema field: loginAttempts / login_attempts)
     const attempts = user.loginAttempts + 1;
     await prisma.user.update({
       where: { id: user.id },
       data: {
         loginAttempts: attempts,
-        // Suspend after 5 failed attempts
-        status: attempts >= 5 ? "suspended" : user.status,
+        // Temporary lock — never permanently suspend via brute force
+        ...(attempts >= LOCK_THRESHOLD && {
+          lockUntil: new Date(Date.now() + LOCK_DURATION_MS),
+        }),
       },
     });
     throw new AuthServiceError("Invalid email or password");
   }
 
-  // Reset attempts on success
+  // Successful login — clear lock state
   await prisma.user.update({
     where: { id: user.id },
     data: {
       loginAttempts: 0,
+      lockUntil: null,
       lastLogin: new Date(),
     },
   });

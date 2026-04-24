@@ -1143,7 +1143,7 @@ export default function RequestsPage({ role = 'student' }) {
                 <>
                   <option value="">Select a type…</option>
                   {reclamationTypes.map((t) => (
-                    <option key={t.id} value={String(t.id)}>{t.nom || `Type ${t.id}`}</option>
+                    <option key={t.id} value={String(t.id)}>{t.nom || t.nom_en || t.nom_ar || `Type ${t.id}`}</option>
                   ))}
                 </>
               ) : (
@@ -1322,7 +1322,7 @@ export default function RequestsPage({ role = 'student' }) {
                 <>
                   <option value="">Select a type…</option>
                   {justificationTypes.map((t) => (
-                    <option key={t.id} value={String(t.id)}>{t.nom || `Type ${t.id}`}</option>
+                    <option key={t.id} value={String(t.id)}>{t.nom || t.nom_en || t.nom_ar || `Type ${t.id}`}</option>
                   ))}
                 </>
               ) : (

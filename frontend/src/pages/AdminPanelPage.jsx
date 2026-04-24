@@ -1,10 +1,12 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import {
+  BarChart3,
   BookOpen,
   GraduationCap,
   History,
   ShieldAlert,
+  Shuffle,
   Settings2,
   UserCog,
   Users,
@@ -44,10 +46,22 @@ const MAIN_SECTIONS = [
     icon: BookOpen,
   },
   {
+    key: 'affectation',
+    title: 'Affectation Campaigns',
+    to: '/dashboard/admin/affectation',
+    icon: Shuffle,
+  },
+  {
     key: 'disciplinary',
     title: 'Disciplinary Management',
     to: '/dashboard/disciplinary',
     icon: ShieldAlert,
+  },
+  {
+    key: 'analytics',
+    title: 'System Analytics',
+    to: '/dashboard/admin/analytics',
+    icon: BarChart3,
   },
   {
     key: 'user-history',

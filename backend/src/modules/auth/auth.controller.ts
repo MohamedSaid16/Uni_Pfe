@@ -195,6 +195,12 @@ export const login = async (req: Request, res: Response) => {
       message: "Login successful",
     });
   } catch (error: any) {
+    if (error?.name === "AuthServiceError" && error?.code === "ACCOUNT_LOCKED") {
+      return res.status(423).json({
+        success: false,
+        error: { code: "ACCOUNT_LOCKED", message: error.message },
+      });
+    }
     return res.status(401).json({
       success: false,
       error: {
@@ -246,8 +252,8 @@ export const logout = async (req: Request, res: Response) => {
       await logoutUser(token);
     }
 
-    res.clearCookie(ACCESS_TOKEN_COOKIE_NAME);
-    res.clearCookie(REFRESH_TOKEN_COOKIE_NAME);
+    res.clearCookie(ACCESS_TOKEN_COOKIE_NAME, { path: '/' });
+    res.clearCookie(REFRESH_TOKEN_COOKIE_NAME, { path: '/' });
 
     return res.json({
       success: true,
@@ -369,8 +375,8 @@ export const changePasswordHandler = async (req: AuthRequest, res: Response) => 
     await changePassword(req.user.id, currentPassword, newPassword);
 
     // Clear tokens so user must re-login with new password
-    res.clearCookie(ACCESS_TOKEN_COOKIE_NAME);
-    res.clearCookie(REFRESH_TOKEN_COOKIE_NAME);
+    res.clearCookie(ACCESS_TOKEN_COOKIE_NAME, { path: '/' });
+    res.clearCookie(REFRESH_TOKEN_COOKIE_NAME, { path: '/' });
 
     return res.json({
       success: true,

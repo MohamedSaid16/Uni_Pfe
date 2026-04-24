@@ -74,6 +74,7 @@ export const requireAuth = async (req: AuthRequest, res: Response, next: NextFun
         status: true,
         emailVerified: true,
         firstUse: true,
+        lockUntil: true,
         userRoles: {
           select: {
             role: {
@@ -86,10 +87,36 @@ export const requireAuth = async (req: AuthRequest, res: Response, next: NextFun
       },
     });
 
-    if (!user || user.status !== "active") {
+    if (!user) {
       res.status(401).json({
         success: false,
-        error: { code: "UNAUTHORIZED", message: "User not found or inactive" },
+        error: { code: "UNAUTHORIZED", message: "Authentication required" },
+      });
+      return;
+    }
+
+    // Temporary brute-force lockout (bypassed in development)
+    const isDev = process.env.NODE_ENV !== "production";
+    if (!isDev && user.lockUntil && user.lockUntil > new Date()) {
+      const minutesLeft = Math.ceil((user.lockUntil.getTime() - Date.now()) / 60000);
+      res.status(423).json({
+        success: false,
+        error: {
+          code: "ACCOUNT_LOCKED",
+          message: `Account temporarily locked due to failed login attempts. Try again in ${minutesLeft} minute(s).`,
+        },
+      });
+      return;
+    }
+
+    if (user.status !== "active") {
+      const message =
+        user.status === "suspended"
+          ? "Account has been suspended. Please contact an administrator."
+          : "Account is inactive.";
+      res.status(401).json({
+        success: false,
+        error: { code: "ACCOUNT_SUSPENDED", message },
       });
       return;
     }

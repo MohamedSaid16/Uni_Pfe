@@ -1,178 +1,701 @@
 /*
-  Intent: Unified PFE management workspace with role-based access control.
-          - Admins: Validation queue with approve/reject controls + config management
-          - Teachers: Subject creation form + their proposals dashboard
-          - Students: Subject gallery with single-selection constraint
-  Access: Teacher / Admin / Student with role-based UI adaptation.
-  Palette: canvas base, surface cards. Semantic colors for status.
-  Depth: shadow-card + border-edge on cards.
-  Typography: Inter. Section headings = text-base font-semibold. Body = text-sm.
-  Spacing: 4px base. Cards p-6. gap-6 between sections.
+  PFE Workspace — redesigned enterprise admin dashboard.
+  Layout: sticky header → 3-column grid (left nav | center | right stats)
+  Mobile: stacked with horizontal scroll tab bar replacing left nav.
 */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   BookOpen,
   Users,
   CalendarDays,
   CheckCircle2,
-  X,
-  Clock3,
+  XCircle,
+  Clock,
   Pencil,
   Plus,
-  Settings,
+  Settings2,
+  AlertTriangle,
+  WifiOff,
+  Lock,
+  Loader2,
+  RefreshCcw,
+  ChevronRight,
+  Shield,
+  FileText,
+  Zap,
+  Activity,
+  BarChart3,
+  Filter,
+  TrendingUp,
 } from 'lucide-react';
 import request from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import PfeConfigView from './PfeConfigView';
 
-/* ── Inline SVG Icons (stroke 1.5) ─────────────────────────── */
-
-const icons = {
-  book: (p) => <BookOpen {...p} />,
-  users: (p) => <Users {...p} />,
-  calendar: (p) => <CalendarDays {...p} />,
-  check: (p) => <CheckCircle2 {...p} />,
-  x: (p) => <X {...p} />,
-  clock: (p) => <Clock3 {...p} />,
-  edit: (p) => <Pencil {...p} />,
-  plus: (p) => <Plus {...p} />,
-  settings: (p) => <Settings {...p} />,
-};
-
-/* ── Status Configs ─────────────────────────────────────────── */
-
-const SUBJECT_STATUS_CONFIG = {
-  propose: { label: 'Pending', bg: 'bg-warning/50', text: 'text-warning', dot: 'bg-warning', border: 'border-warning/50' },
-  valide: { label: 'Validated', bg: 'bg-success/50', text: 'text-success', dot: 'bg-success', border: 'border-success/50' },
-  reserve: { label: 'Reserved', bg: 'bg-brand/50', text: 'text-brand', dot: 'bg-brand', border: 'border-brand/50' },
-  affecte: { label: 'Assigned', bg: 'bg-surface-200', text: 'text-ink-secondary', dot: 'bg-brand-dark', border: 'border-edge-subtle' },
-  termine: { label: 'Completed', bg: 'bg-surface-200', text: 'text-ink-tertiary', dot: 'bg-ink-muted', border: 'border-edge-subtle' },
-};
+/* ── Helpers ────────────────────────────────────────────────── */
 
 const getUserDisplayName = (user) => {
   if (!user) return 'Unknown';
-  const fullName = `${user.prenom || ''} ${user.nom || ''}`.trim();
-  return fullName || user.name || user.email || 'Unknown';
+  return `${user.prenom || ''} ${user.nom || ''}`.trim() || user.email || 'Unknown';
 };
 
-/* ── Tab Definitions ────────────────────────────────────────── */
+function normalizeApiError(err) {
+  if (!err) return { kind: 'unknown', message: 'Unknown error' };
+  if (err.code === 'NETWORK_ERROR' || err.status === 0)
+    return { kind: 'network', message: 'Server unreachable. Start the backend on http://localhost:5000.' };
+  if (err.status === 401)
+    return { kind: 'auth', message: 'Session expired. Please sign in again.' };
+  if (err.status === 403)
+    return { kind: 'forbidden', message: err.message || 'Access denied.' };
+  if (err.status >= 500)
+    return { kind: 'server', message: err.message || 'Server error. Please try again.' };
+  return { kind: 'client', message: err.message || 'Something went wrong.' };
+}
+
+const fmt = (n) => (n ?? 0).toString();
+
+const SUBJECT_STATUS = {
+  propose: {
+    label: 'Pending',
+    bg: 'bg-warning/10',
+    text: 'text-warning',
+    dot: 'bg-warning',
+    border: 'border-warning/30',
+    ring: 'ring-warning/20',
+  },
+  valide: {
+    label: 'Validated',
+    bg: 'bg-success/10',
+    text: 'text-success',
+    dot: 'bg-success',
+    border: 'border-success/30',
+    ring: 'ring-success/20',
+  },
+  reserve: {
+    label: 'Reserved',
+    bg: 'bg-brand/10',
+    text: 'text-brand',
+    dot: 'bg-brand',
+    border: 'border-brand/30',
+    ring: 'ring-brand/20',
+  },
+  affecte: {
+    label: 'Assigned',
+    bg: 'bg-surface-200',
+    text: 'text-ink-secondary',
+    dot: 'bg-ink-muted',
+    border: 'border-edge-subtle',
+    ring: 'ring-edge/20',
+  },
+  termine: {
+    label: 'Completed',
+    bg: 'bg-surface-300',
+    text: 'text-ink-tertiary',
+    dot: 'bg-ink-muted',
+    border: 'border-edge-subtle',
+    ring: 'ring-edge/10',
+  },
+};
 
 const ADMIN_TABS = [
-  { id: 'subjects', label: 'Validation Queue', Icon: icons.book },
-  { id: 'groups', label: 'Groups', Icon: icons.users },
-  { id: 'defense', label: 'Defense Plan', Icon: icons.calendar },
-  { id: 'config', label: 'Configuration', Icon: icons.settings },
+  { id: 'subjects', label: 'Validation Queue', Icon: FileText, hint: 'Review proposals' },
+  { id: 'groups', label: 'Groups', Icon: Users, hint: 'Manage PFE groups' },
+  { id: 'defense', label: 'Defense Plan', Icon: CalendarDays, hint: 'Schedule defenses' },
+  { id: 'config', label: 'Configuration', Icon: Settings2, hint: 'System settings' },
 ];
 
 const TEACHER_TABS = [
-  { id: 'subjects', label: 'My Subjects', Icon: icons.book },
-  { id: 'groups', label: 'Groups', Icon: icons.users },
-  { id: 'defense', label: 'Defense Plan', Icon: icons.calendar },
+  { id: 'subjects', label: 'My Subjects', Icon: BookOpen, hint: 'Your proposals' },
+  { id: 'groups', label: 'Groups', Icon: Users, hint: 'Groups on your topics' },
+  { id: 'defense', label: 'Defense Plan', Icon: CalendarDays, hint: 'Defense schedule' },
 ];
 
 const STUDENT_TABS = [
-  { id: 'subjects', label: 'Available Subjects', Icon: icons.book },
-  { id: 'groups', label: 'My Group', Icon: icons.users },
-  { id: 'defense', label: 'Defense Info', Icon: icons.calendar },
+  { id: 'subjects', label: 'Available Subjects', Icon: BookOpen, hint: 'Browse topics' },
+  { id: 'groups', label: 'My Group', Icon: Users, hint: 'Your PFE group' },
+  { id: 'defense', label: 'Defense Info', Icon: CalendarDays, hint: 'Defense details' },
 ];
 
-/* ───────────────────────────────────────────────────────────── 
-   ADMIN SUBJECT VALIDATION QUEUE
-   ───────────────────────────────────────────────────────────── */
+/* ── Skeleton primitives ────────────────────────────────────── */
 
-function AdminValidationQueue({ subjects, loading, error, onValidate, onReject }) {
-  const allSubjects = Array.isArray(subjects) ? subjects : [];
-
+function Shimmer({ className }) {
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-edge bg-surface p-6 shadow-card">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-brand">
-            Admin Tools
-          </p>
-          <h2 className="mt-2 text-xl font-bold tracking-tight text-ink">
-            Subjects Oversight
-          </h2>
-          <p className="mt-1 text-sm text-ink-secondary">
-            Review all subjects ({allSubjects.length}) and validate pending proposals
-          </p>
-        </div>
-      </section>
+    <div
+      className={`animate-pulse rounded bg-surface-300 ${className}`}
+    />
+  );
+}
 
-      {loading ? (
-        <div className="rounded-3xl border border-dashed border-edge bg-surface p-8 text-center text-sm text-ink-secondary">
-          Loading validation queue...
+function SkeletonCard() {
+  return (
+    <div className="rounded-2xl border border-edge bg-surface p-5 shadow-card">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 space-y-3">
+          <div className="flex items-center gap-3">
+            <Shimmer className="h-5 w-3/4" />
+            <Shimmer className="h-5 w-16 rounded-full" />
+          </div>
+          <Shimmer className="h-4 w-full" />
+          <Shimmer className="h-4 w-2/3" />
+          <div className="flex gap-2 pt-1">
+            <Shimmer className="h-3 w-24" />
+            <Shimmer className="h-3 w-16" />
+          </div>
         </div>
-      ) : error ? (
-        <div className="rounded-3xl border border-danger/50 bg-danger/50 p-5 text-sm text-danger">
-          {error}
+        <div className="flex gap-2 flex-shrink-0">
+          <Shimmer className="h-9 w-20 rounded-lg" />
+          <Shimmer className="h-9 w-20 rounded-lg" />
         </div>
-      ) : allSubjects.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-edge bg-surface p-8 text-center text-sm text-ink-secondary">
-          No subjects available
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {allSubjects.map((subject) => {
-            const config = SUBJECT_STATUS_CONFIG[subject.status] || {
-              bg: 'bg-surface',
-              text: 'text-ink-secondary',
-              dot: 'bg-ink-muted',
-              border: 'border-edge-subtle',
-            };
-            return (
-            <div
-              key={subject.id}
-              className={`rounded-2xl border ${config.border} ${config.bg} p-5 shadow-card`}
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <h3 className="text-base font-semibold text-ink">
-                    {subject.titre_ar || subject.titre_en || `Subject #${subject.id}`}
-                  </h3>
-                  <p className="mt-1 text-sm text-ink-secondary">
-                    {subject.description_ar || subject.description_en || '—'}
-                  </p>
-                  <div className="mt-3 text-sm text-ink-tertiary">
-                    <span className="font-medium text-ink">Teacher:</span> {getUserDisplayName(subject.enseignant?.user)}
-                  </div>
-                  <div className="mt-1 text-sm text-ink-tertiary">
-                    <span className="font-medium text-ink">Status:</span> {subject.status || 'unknown'}
-                  </div>
-                </div>
-                {subject.status === 'propose' && (
-                  <div className="flex gap-2 ml-4">
-                    <button
-                      onClick={() => onValidate(subject.id)}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-surface bg-success rounded-lg hover:opacity-90 transition-colors"
-                    >
-                      <icons.check className="w-4 h-4" />
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => onReject(subject.id)}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-surface bg-danger rounded-lg hover:opacity-90 transition-colors"
-                    >
-                      <icons.x className="w-4 h-4" />
-                      Reject
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          );})}
-        </div>
+      </div>
+    </div>
+  );
+}
+
+function SkeletonList({ count = 3 }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 mb-2">
+        <Shimmer className="h-8 w-24 rounded-full" />
+        <Shimmer className="h-8 w-24 rounded-full" />
+        <Shimmer className="h-8 w-24 rounded-full" />
+      </div>
+      {Array.from({ length: count }, (_, i) => (
+        <SkeletonCard key={i} />
+      ))}
+    </div>
+  );
+}
+
+function SkeletonStatCard() {
+  return (
+    <div className="rounded-xl border border-edge bg-surface p-4">
+      <div className="flex items-center justify-between mb-3">
+        <Shimmer className="h-3 w-20" />
+        <Shimmer className="h-6 w-6 rounded-lg" />
+      </div>
+      <Shimmer className="h-7 w-12" />
+    </div>
+  );
+}
+
+/* ── Small shared UI ────────────────────────────────────────── */
+
+function StatusBadge({ status }) {
+  const cfg = SUBJECT_STATUS[status] || {
+    label: status || 'Unknown',
+    bg: 'bg-surface-200',
+    text: 'text-ink-secondary',
+    dot: 'bg-ink-muted',
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${cfg.bg} ${cfg.text}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
+      {cfg.label}
+    </span>
+  );
+}
+
+function CapacityBar({ used, max }) {
+  const pct = max > 0 ? Math.min(100, (used / max) * 100) : 0;
+  const isFull = used >= max;
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1.5 rounded-full bg-surface-300 overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all ${isFull ? 'bg-danger' : 'bg-brand'}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-xs text-ink-tertiary whitespace-nowrap">
+        {used}/{max}
+      </span>
+    </div>
+  );
+}
+
+function EmptyState({ icon: Icon = FileText, title, hint, action }) {
+  return (
+    <div className="rounded-3xl border border-dashed border-edge bg-surface p-12 text-center">
+      <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-200">
+        <Icon className="w-6 h-6 text-ink-muted" />
+      </div>
+      <p className="text-sm font-semibold text-ink">{title}</p>
+      {hint && <p className="mt-1 text-xs text-ink-tertiary max-w-xs mx-auto">{hint}</p>}
+      {action && <div className="mt-4">{action}</div>}
+    </div>
+  );
+}
+
+function ErrorBanner({ error, onRetry }) {
+  if (!error) return null;
+  const MAP = {
+    network: { Icon: WifiOff, cls: 'border-warning/30 bg-warning/10', icon: 'text-warning', title: 'Backend unreachable' },
+    auth: { Icon: Lock, cls: 'border-warning/30 bg-warning/10', icon: 'text-warning', title: 'Session expired' },
+    forbidden: { Icon: Lock, cls: 'border-danger/30 bg-danger/10', icon: 'text-danger', title: 'Access denied' },
+    server: { Icon: AlertTriangle, cls: 'border-danger/30 bg-danger/10', icon: 'text-danger', title: 'Server error' },
+  };
+  const cfg = MAP[error.kind] || MAP.server;
+  const { Icon } = cfg;
+  return (
+    <div className={`flex items-start gap-3 rounded-2xl border ${cfg.cls} p-4`} role="alert">
+      <Icon className={`w-5 h-5 mt-0.5 flex-shrink-0 ${cfg.icon}`} />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-ink">{cfg.title}</p>
+        <p className="mt-0.5 text-sm text-ink-secondary">{error.message}</p>
+      </div>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-edge bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-200 transition-colors flex-shrink-0"
+        >
+          <RefreshCcw className="w-3.5 h-3.5" />
+          Retry
+        </button>
       )}
     </div>
   );
 }
 
-/* ───────────────────────────────────────────────────────────── 
-   TEACHER SUBJECT CREATION & DASHBOARD
+/* ── Page Header ────────────────────────────────────────────── */
+
+const ROLE_CFG = {
+  admin: { label: 'Administrator', cls: 'bg-brand/10 text-brand border-brand/20' },
+  enseignant: { label: 'Teacher', cls: 'bg-success/10 text-success border-success/20' },
+  etudiant: { label: 'Student', cls: 'bg-warning/10 text-warning border-warning/20' },
+};
+
+function PageHeader({ role, onRefresh, loading }) {
+  const rc = ROLE_CFG[role] || { label: 'User', cls: 'bg-surface-200 text-ink-secondary border-edge' };
+  const subtitle = {
+    admin: 'Oversee subjects, groups, jury planning, and system configuration.',
+    enseignant: 'Manage your research proposals and track assigned groups.',
+    etudiant: 'Browse validated subjects and check your group assignment.',
+  }[role] || '';
+
+  return (
+    <header className="rounded-3xl border border-edge bg-surface p-6 shadow-card">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <span className="text-xs font-semibold uppercase tracking-[0.22em] text-brand">
+              PFE Workspace
+            </span>
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${rc.cls}`}>
+              <Shield className="w-3 h-3" />
+              {rc.label}
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success">
+              <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+              Campaign Open
+            </span>
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-ink">PFE Configuration</h1>
+          <p className="mt-1 text-sm text-ink-secondary max-w-xl">{subtitle}</p>
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          className="inline-flex items-center gap-2 rounded-xl border border-edge bg-surface-200 px-4 py-2 text-sm font-medium text-ink-secondary transition-all hover:bg-surface-300 hover:text-ink disabled:opacity-50"
+        >
+          <RefreshCcw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
+    </header>
+  );
+}
+
+/* ── Left Navigation ────────────────────────────────────────── */
+
+function NavItem({ tab, isActive, onClick, count }) {
+  const { Icon } = tab;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+        isActive
+          ? 'bg-brand text-surface shadow-md'
+          : 'text-ink-secondary hover:bg-surface-200 hover:text-ink'
+      }`}
+    >
+      <Icon className="w-4 h-4 flex-shrink-0" />
+      <span className="flex-1 text-left leading-none">{tab.label}</span>
+      {count != null && count > 0 && (
+        <span
+          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+            isActive ? 'bg-white/20 text-white' : 'bg-brand/10 text-brand'
+          }`}
+        >
+          {count}
+        </span>
+      )}
+      <ChevronRight
+        className={`w-3.5 h-3.5 flex-shrink-0 transition-opacity ${
+          isActive ? 'opacity-40' : 'opacity-0 group-hover:opacity-30'
+        }`}
+      />
+    </button>
+  );
+}
+
+function LeftNav({ tabs, activeTab, onTabChange, counts }) {
+  return (
+    <nav className="rounded-2xl border border-edge bg-surface p-3 shadow-card space-y-0.5">
+      <p className="px-3 mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-ink-muted">
+        Workspace
+      </p>
+      {tabs.map((tab) => (
+        <NavItem
+          key={tab.id}
+          tab={tab}
+          isActive={activeTab === tab.id}
+          onClick={() => onTabChange(tab.id)}
+          count={counts[tab.id]}
+        />
+      ))}
+    </nav>
+  );
+}
+
+/* ── Right Panel — Stats + Insights ────────────────────────── */
+
+function StatCard({ icon: Icon, label, value, colorCls, loading: statLoading }) {
+  return (
+    <div className="rounded-xl border border-edge bg-surface p-4 transition-shadow hover:shadow-card">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-medium text-ink-tertiary">{label}</p>
+        <div className={`rounded-lg p-1.5 ${colorCls}`}>
+          <Icon className="w-3.5 h-3.5" />
+        </div>
+      </div>
+      {statLoading ? (
+        <Shimmer className="h-7 w-10" />
+      ) : (
+        <p className="text-2xl font-bold tracking-tight text-ink">{value}</p>
+      )}
+    </div>
+  );
+}
+
+function SystemDot({ status }) {
+  const MAP = {
+    online: { dot: 'bg-success', label: 'Online', text: 'text-success' },
+    degraded: { dot: 'bg-warning animate-pulse', label: 'Degraded', text: 'text-warning' },
+    offline: { dot: 'bg-danger animate-pulse', label: 'Offline', text: 'text-danger' },
+  };
+  const c = MAP[status] || MAP.online;
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`w-2 h-2 rounded-full ${c.dot}`} />
+      <span className={`text-xs font-medium ${c.text}`}>{c.label}</span>
+    </div>
+  );
+}
+
+function RightPanel({ stats, systemStatus, lastUpdated, isAdmin, loading }) {
+  return (
+    <aside className="space-y-4">
+      <div className="rounded-2xl border border-edge bg-surface p-4 shadow-card">
+        <div className="flex items-center gap-2 mb-4">
+          <BarChart3 className="w-4 h-4 text-brand" />
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-muted">
+            Quick Stats
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-2.5">
+          <StatCard icon={FileText} label="Subjects" value={fmt(stats.total)} colorCls="bg-brand/10 text-brand" loading={loading} />
+          <StatCard icon={Clock} label="Pending" value={fmt(stats.pending)} colorCls="bg-warning/10 text-warning" loading={loading} />
+          <StatCard icon={CheckCircle2} label="Validated" value={fmt(stats.validated)} colorCls="bg-success/10 text-success" loading={loading} />
+          <StatCard icon={Users} label="Groups" value={fmt(stats.groups)} colorCls="bg-brand/10 text-brand" loading={loading} />
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-edge bg-surface p-4 shadow-card">
+        <div className="flex items-center gap-2 mb-4">
+          <Activity className="w-4 h-4 text-brand" />
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-muted">
+            System
+          </p>
+        </div>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-ink-secondary">API Status</span>
+            <SystemDot status={systemStatus} />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-ink-secondary">Last sync</span>
+            <span className="text-xs font-mono text-ink-tertiary">{lastUpdated}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-ink-secondary">Environment</span>
+            <span className="rounded-full bg-surface-200 px-2 py-0.5 text-xs font-medium text-ink-secondary">
+              {process.env.NODE_ENV || 'development'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {isAdmin && (
+        <div className="rounded-2xl border border-brand/20 bg-brand/5 p-4">
+          <div className="flex items-center gap-2 mb-1.5">
+            <Zap className="w-3.5 h-3.5 text-brand" />
+            <p className="text-xs font-semibold text-brand">Campaign Active</p>
+          </div>
+          <p className="text-xs text-ink-secondary leading-relaxed">
+            Subject proposals are currently open for this academic year.
+          </p>
+        </div>
+      )}
+
+      <div className="rounded-2xl border border-edge bg-surface p-4 shadow-card">
+        <div className="flex items-center gap-2 mb-3">
+          <TrendingUp className="w-4 h-4 text-brand" />
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-muted">
+            Progress
+          </p>
+        </div>
+        <div className="space-y-3">
+          {[
+            {
+              label: 'Validation rate',
+              value: stats.total > 0 ? Math.round((stats.validated / stats.total) * 100) : 0,
+              color: 'bg-success',
+            },
+            {
+              label: 'Group fill rate',
+              value: stats.total > 0 ? Math.min(100, Math.round((stats.groups / Math.max(1, stats.validated)) * 100)) : 0,
+              color: 'bg-brand',
+            },
+          ].map(({ label, value, color }) => (
+            <div key={label}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-ink-secondary">{label}</span>
+                <span className="text-xs font-semibold text-ink">{value}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-surface-300 overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${color} transition-all duration-500`}
+                  style={{ width: `${value}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+/* ── Filter pills ───────────────────────────────────────────── */
+
+function FilterPills({ options, value, onChange }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-150 ${
+            value === opt.value
+              ? 'bg-brand text-surface shadow-sm'
+              : 'bg-surface-200 text-ink-secondary hover:bg-surface-300 hover:text-ink'
+          }`}
+        >
+          {opt.dot && (
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                value === opt.value ? 'bg-surface/60' : opt.dot
+              }`}
+            />
+          )}
+          {opt.label}
+          {opt.count != null && (
+            <span
+              className={`rounded-full px-1.5 text-[10px] font-bold ${
+                value === opt.value ? 'bg-white/20' : 'bg-surface-300'
+              }`}
+            >
+              {opt.count}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ── Section header ─────────────────────────────────────────── */
+
+function SectionHeader({ eyebrow, title, subtitle, action }) {
+  return (
+    <div className="rounded-2xl border border-edge bg-surface p-5 shadow-card">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          {eyebrow && (
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-brand mb-1.5">
+              {eyebrow}
+            </p>
+          )}
+          <h2 className="text-lg font-bold tracking-tight text-ink">{title}</h2>
+          {subtitle && <p className="mt-0.5 text-sm text-ink-secondary">{subtitle}</p>}
+        </div>
+        {action}
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   ADMIN VALIDATION QUEUE
    ───────────────────────────────────────────────────────────── */
 
-function TeacherSubjectsView({ subjects, loading, error, onRefresh, teacherProfileId }) {
+function AdminValidationQueue({ subjects, loading, error, onValidate, onReject, onRetry }) {
+  const [filter, setFilter] = useState('all');
+
+  const allSubjects = Array.isArray(subjects) ? subjects : [];
+
+  const counts = useMemo(
+    () => ({
+      all: allSubjects.length,
+      propose: allSubjects.filter((s) => s.status === 'propose').length,
+      valide: allSubjects.filter((s) => s.status === 'valide').length,
+      rejected: allSubjects.filter((s) => !['propose', 'valide'].includes(s.status)).length,
+    }),
+    [allSubjects]
+  );
+
+  const filtered = useMemo(() => {
+    if (filter === 'all') return allSubjects;
+    if (filter === 'rejected') return allSubjects.filter((s) => !['propose', 'valide'].includes(s.status));
+    return allSubjects.filter((s) => s.status === filter);
+  }, [allSubjects, filter]);
+
+  const filterOptions = [
+    { value: 'all', label: 'All', count: counts.all },
+    { value: 'propose', label: 'Pending', count: counts.propose, dot: 'bg-warning' },
+    { value: 'valide', label: 'Validated', count: counts.valide, dot: 'bg-success' },
+    { value: 'rejected', label: 'Other', count: counts.rejected, dot: 'bg-ink-muted' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader
+        eyebrow="Admin Tools"
+        title="Subjects Oversight"
+        subtitle={`Review and validate ${allSubjects.length} subject proposal${allSubjects.length !== 1 ? 's' : ''}`}
+      />
+
+      {loading ? (
+        <SkeletonList count={3} />
+      ) : error ? (
+        <ErrorBanner error={error} onRetry={onRetry} />
+      ) : allSubjects.length === 0 ? (
+        <EmptyState
+          icon={FileText}
+          title="No subjects yet"
+          hint="Teachers haven't submitted any proposals yet."
+        />
+      ) : (
+        <>
+          <FilterPills options={filterOptions} value={filter} onChange={setFilter} />
+
+          {filtered.length === 0 ? (
+            <EmptyState icon={Filter} title={`No ${filter} subjects`} hint="Try a different filter." />
+          ) : (
+            <div className="space-y-3">
+              {filtered.map((subject) => {
+                const cfg = SUBJECT_STATUS[subject.status] || SUBJECT_STATUS.affecte;
+                const isPending = subject.status === 'propose';
+                return (
+                  <div
+                    key={subject.id}
+                    className={`group rounded-2xl border ${cfg.border} bg-surface p-5 shadow-card transition-all duration-200 hover:shadow-card-hover`}
+                  >
+                    <div className="flex items-start gap-4">
+                      {/* Left accent bar */}
+                      <div className={`w-1 self-stretch rounded-full flex-shrink-0 ${cfg.dot}`} />
+
+                      <div className="flex-1 min-w-0">
+                        {/* Title row */}
+                        <div className="flex flex-wrap items-start justify-between gap-3 mb-2">
+                          <div className="flex flex-wrap items-center gap-2 min-w-0">
+                            <h3 className="text-sm font-semibold text-ink truncate">
+                              {subject.titre_ar || subject.titre_en || `Subject #${subject.id}`}
+                            </h3>
+                            <StatusBadge status={subject.status} />
+                          </div>
+                          {isPending && (
+                            <div className="flex gap-2 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => onValidate(subject.id)}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-success px-3 py-1.5 text-xs font-semibold text-surface transition-opacity hover:opacity-90"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onReject(subject.id)}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-danger px-3 py-1.5 text-xs font-semibold text-surface transition-opacity hover:opacity-90"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                                Reject
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Description */}
+                        <p className="text-sm text-ink-secondary line-clamp-2 mb-3">
+                          {subject.description_ar || subject.description_en || 'No description provided.'}
+                        </p>
+
+                        {/* Meta row */}
+                        <div className="flex flex-wrap items-center gap-4 text-xs text-ink-tertiary">
+                          <span>
+                            <span className="font-medium text-ink-secondary">Teacher:</span>{' '}
+                            {getUserDisplayName(subject.enseignant?.user)}
+                          </span>
+                          {subject.typeProjet && (
+                            <span className="rounded-md bg-surface-200 px-2 py-0.5 font-medium capitalize">
+                              {subject.typeProjet}
+                            </span>
+                          )}
+                          <div className="flex items-center gap-1.5 flex-1 min-w-[120px]">
+                            <span className="font-medium text-ink-secondary">Capacity:</span>
+                            <div className="flex-1">
+                              <CapacityBar
+                                used={subject.groupsPfe?.length || 0}
+                                max={subject.maxGrps || 1}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   TEACHER SUBJECTS VIEW
+   ───────────────────────────────────────────────────────────── */
+
+function TeacherSubjectsView({ subjects, loading, error, onRefresh, teacherProfileId, onRetry }) {
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
     titre_ar: '',
@@ -183,126 +706,122 @@ function TeacherSubjectsView({ subjects, loading, error, onRefresh, teacherProfi
     maxGrps: 1,
   });
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
 
-  const handleFormChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+  const resetForm = () => {
+    setFormData({ titre_ar: '', titre_en: '', description_ar: '', description_en: '', typeProjet: 'application', maxGrps: 1 });
+    setSubmitError(null);
+    setShowForm(false);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
+    setSubmitError(null);
     if (!teacherProfileId) {
-      alert('Teacher profile is missing. Please re-login and try again.');
+      setSubmitError({ kind: 'client', message: 'Teacher profile missing. Please re-login.' });
       return;
     }
-
     setSubmitting(true);
     try {
       await request('/api/v1/pfe/sujets', {
         method: 'POST',
-        body: JSON.stringify({
-          ...formData,
-          enseignantId: Number(teacherProfileId),
-        }),
+        body: JSON.stringify({ ...formData, enseignantId: Number(teacherProfileId) }),
       });
-      setFormData({ titre_ar: '', titre_en: '', description_ar: '', description_en: '', typeProjet: 'application', maxGrps: 1 });
-      setShowForm(false);
-      console.log('[TeacherSubjectsView] Form submitted, refreshing...');
+      resetForm();
       onRefresh();
     } catch (err) {
-      alert('Failed to create subject: ' + err.message);
+      setSubmitError(normalizeApiError(err));
     } finally {
       setSubmitting(false);
     }
   };
 
-  console.log('[TeacherSubjectsView] render - subjects count:', subjects.length, 'teacherProfileId:', teacherProfileId);
-  const teacherSubjects = subjects;
+  const list = Array.isArray(subjects) ? subjects : [];
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-edge bg-surface p-6 shadow-card">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-brand">
-              Research Topics
-            </p>
-            <h2 className="mt-2 text-xl font-bold tracking-tight text-ink">
-              My Subjects
-            </h2>
-            <p className="mt-1 text-sm text-ink-secondary">
-              Propose and manage your PFE research topics
-            </p>
-          </div>
+    <div className="space-y-4">
+      <SectionHeader
+        eyebrow="Research Topics"
+        title="My Subjects"
+        subtitle={`${list.length} proposal${list.length !== 1 ? 's' : ''} submitted`}
+        action={
           <button
-            onClick={() => setShowForm(!showForm)}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-surface bg-brand rounded-lg hover:bg-brand-hover transition-all duration-150"
+            type="button"
+            onClick={() => setShowForm((v) => !v)}
+            disabled={!teacherProfileId}
+            className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-surface shadow-sm transition-all hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <icons.plus className="w-4 h-4" />
+            <Plus className="w-4 h-4" />
             New Subject
           </button>
-        </div>
-      </section>
+        }
+      />
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="rounded-3xl border border-edge bg-surface p-6 shadow-card space-y-4">
-          <h3 className="text-lg font-semibold text-ink">Propose New Subject</h3>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-ink mb-2">Title (Arabic)</label>
-              <input
-                type="text"
-                value={formData.titre_ar}
-                onChange={(e) => handleFormChange('titre_ar', e.target.value)}
-                required
-                className="w-full rounded-lg border border-edge-subtle bg-control-bg px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
-                placeholder="العنوان"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-ink mb-2">Title (English)</label>
-              <input
-                type="text"
-                value={formData.titre_en}
-                onChange={(e) => handleFormChange('titre_en', e.target.value)}
-                className="w-full rounded-lg border border-edge-subtle bg-control-bg px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
-                placeholder="Title"
-              />
-            </div>
+        <form
+          onSubmit={handleSubmit}
+          className="rounded-2xl border border-edge bg-surface p-6 shadow-card space-y-5"
+        >
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-semibold text-ink">Propose New Subject</h3>
+            <button type="button" onClick={resetForm} className="text-ink-muted hover:text-ink transition-colors">
+              <XCircle className="w-5 h-5" />
+            </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-ink mb-2">Description (Arabic)</label>
-              <textarea
-                value={formData.description_ar}
-                onChange={(e) => handleFormChange('description_ar', e.target.value)}
-                required
-                rows="3"
-                className="w-full rounded-lg border border-edge-subtle bg-control-bg px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
-                placeholder="وصف المشروع"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-ink mb-2">Description (English)</label>
-              <textarea
-                value={formData.description_en}
-                onChange={(e) => handleFormChange('description_en', e.target.value)}
-                rows="3"
-                className="w-full rounded-lg border border-edge-subtle bg-control-bg px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
-                placeholder="Project description"
-              />
-            </div>
+          {submitError && <ErrorBanner error={submitError} />}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {[
+              { field: 'titre_ar', label: 'Title (Arabic)', placeholder: 'العنوان', required: true },
+              { field: 'titre_en', label: 'Title (English)', placeholder: 'Project title' },
+            ].map(({ field, label, placeholder, required }) => (
+              <div key={field}>
+                <label className="block text-xs font-semibold text-ink-secondary mb-1.5 uppercase tracking-wide">
+                  {label}{required && <span className="text-danger ml-0.5">*</span>}
+                </label>
+                <input
+                  type="text"
+                  value={formData[field]}
+                  onChange={(e) => setFormData((p) => ({ ...p, [field]: e.target.value }))}
+                  required={required}
+                  placeholder={placeholder}
+                  className="w-full rounded-xl border border-edge-subtle bg-control-bg px-3 py-2.5 text-sm text-ink placeholder-ink-muted outline-none transition-all focus:border-brand focus:ring-2 focus:ring-brand/20"
+                />
+              </div>
+            ))}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {[
+              { field: 'description_ar', label: 'Description (Arabic)', placeholder: 'وصف المشروع', required: true },
+              { field: 'description_en', label: 'Description (English)', placeholder: 'Project description' },
+            ].map(({ field, label, placeholder, required }) => (
+              <div key={field}>
+                <label className="block text-xs font-semibold text-ink-secondary mb-1.5 uppercase tracking-wide">
+                  {label}{required && <span className="text-danger ml-0.5">*</span>}
+                </label>
+                <textarea
+                  value={formData[field]}
+                  onChange={(e) => setFormData((p) => ({ ...p, [field]: e.target.value }))}
+                  required={required}
+                  rows={3}
+                  placeholder={placeholder}
+                  className="w-full rounded-xl border border-edge-subtle bg-control-bg px-3 py-2.5 text-sm text-ink placeholder-ink-muted outline-none transition-all focus:border-brand focus:ring-2 focus:ring-brand/20 resize-none"
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-ink mb-2">Project Type</label>
+              <label className="block text-xs font-semibold text-ink-secondary mb-1.5 uppercase tracking-wide">
+                Project Type
+              </label>
               <select
                 value={formData.typeProjet}
-                onChange={(e) => handleFormChange('typeProjet', e.target.value)}
-                className="w-full rounded-lg border border-edge-subtle bg-control-bg px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                onChange={(e) => setFormData((p) => ({ ...p, typeProjet: e.target.value }))}
+                className="w-full rounded-xl border border-edge-subtle bg-control-bg px-3 py-2.5 text-sm text-ink outline-none transition-all focus:border-brand focus:ring-2 focus:ring-brand/20"
               >
                 <option value="application">Application</option>
                 <option value="research">Research</option>
@@ -310,175 +829,202 @@ function TeacherSubjectsView({ subjects, loading, error, onRefresh, teacherProfi
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-ink mb-2">Max Groups</label>
+              <label className="block text-xs font-semibold text-ink-secondary mb-1.5 uppercase tracking-wide">
+                Max Groups
+              </label>
               <input
                 type="number"
-                min="1"
-                max="5"
+                min={1}
+                max={5}
                 value={formData.maxGrps}
-                onChange={(e) => handleFormChange('maxGrps', parseInt(e.target.value))}
-                className="w-full rounded-lg border border-edge-subtle bg-control-bg px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                onChange={(e) => setFormData((p) => ({ ...p, maxGrps: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
+                className="w-full rounded-xl border border-edge-subtle bg-control-bg px-3 py-2.5 text-sm text-ink outline-none transition-all focus:border-brand focus:ring-2 focus:ring-brand/20"
               />
             </div>
           </div>
 
-          <div className="flex gap-3 justify-end">
+          <div className="flex justify-end gap-3 pt-2 border-t border-edge-subtle">
             <button
               type="button"
-              onClick={() => setShowForm(false)}
-              className="px-4 py-2 text-sm font-medium text-ink bg-surface-200 border border-edge-subtle rounded-lg hover:bg-surface-300 transition-colors"
+              onClick={resetForm}
+              className="rounded-xl border border-edge bg-surface px-4 py-2 text-sm font-medium text-ink hover:bg-surface-200 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="px-4 py-2 text-sm font-medium text-surface bg-brand rounded-lg hover:bg-brand-hover transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-surface transition-opacity hover:opacity-90 disabled:opacity-60"
             >
-              {submitting ? 'Creating...' : 'Create Subject'}
+              {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+              {submitting ? 'Creating…' : 'Create Subject'}
             </button>
           </div>
         </form>
       )}
 
       {loading ? (
-        <div className="rounded-3xl border border-dashed border-edge bg-surface p-8 text-center text-sm text-ink-secondary">
-          Loading subjects...
-        </div>
+        <SkeletonList count={3} />
       ) : error ? (
-        <div className="rounded-3xl border border-danger/50 bg-danger/50 p-5 text-sm text-danger">
-          {error}
-        </div>
-      ) : teacherSubjects.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-edge bg-surface p-8 text-center text-sm text-ink-secondary">
-          No subjects yet. Create one to get started.
-        </div>
+        <ErrorBanner error={error} onRetry={onRetry} />
+      ) : list.length === 0 ? (
+        <EmptyState
+          icon={BookOpen}
+          title="No subjects yet"
+          hint="Create your first research topic proposal."
+          action={
+            <button
+              type="button"
+              onClick={() => setShowForm(true)}
+              className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-surface"
+            >
+              <Plus className="w-4 h-4" /> New Subject
+            </button>
+          }
+        />
       ) : (
-        <div className="overflow-hidden rounded-3xl border border-edge bg-surface shadow-card">
-          <table className="min-w-full divide-y divide-edge-subtle text-left text-sm">
-            <thead className="bg-canvas/90 text-ink-tertiary">
-              <tr>
-                <th className="px-5 py-3 font-medium">Title</th>
-                <th className="px-5 py-3 font-medium">Status</th>
-                <th className="px-5 py-3 font-medium">Groups</th>
-                <th className="px-5 py-3 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-edge-subtle bg-surface">
-              {teacherSubjects.map((subject) => {
-                const config = SUBJECT_STATUS_CONFIG[subject.status] || {};
-                return (
-                  <tr key={subject.id}>
-                    <td className="px-5 py-4 text-ink">
-                      <div className="font-medium">{subject.titre_ar || subject.titre_en || `Subject #${subject.id}`}</div>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${config.bg} ${config.text}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
-                        {config.label}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4 text-ink-secondary text-center">
-                      {subject.groupsPfe?.length || 0} / {subject.maxGrps}
-                    </td>
-                    <td className="px-5 py-4">
-                      {subject.status === 'propose' && (
-                        <button className="inline-flex items-center gap-1 px-2 py-1 text-xs text-brand hover:bg-brand/50 rounded transition-colors">
-                          <icons.edit className="w-4 h-4" />
-                          Edit
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="rounded-2xl border border-edge bg-surface shadow-card overflow-hidden">
+          <div className="border-b border-edge-subtle bg-surface-200/60 px-5 py-3">
+            <div className="grid grid-cols-[1fr_120px_80px_80px] gap-4 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+              <span>Subject</span>
+              <span>Status</span>
+              <span className="text-center">Groups</span>
+              <span>Actions</span>
+            </div>
+          </div>
+          <div className="divide-y divide-edge-subtle">
+            {list.map((subject) => {
+              const cfg = SUBJECT_STATUS[subject.status] || SUBJECT_STATUS.affecte;
+              return (
+                <div
+                  key={subject.id}
+                  className="grid grid-cols-[1fr_120px_80px_80px] items-center gap-4 px-5 py-4 hover:bg-surface-200/40 transition-colors"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-ink truncate">
+                      {subject.titre_ar || subject.titre_en || `Subject #${subject.id}`}
+                    </p>
+                    {subject.typeProjet && (
+                      <span className="text-xs text-ink-tertiary capitalize">{subject.typeProjet}</span>
+                    )}
+                  </div>
+                  <div>
+                    <StatusBadge status={subject.status} />
+                  </div>
+                  <div className="text-center">
+                    <span className="text-sm font-semibold text-ink">{subject.groupsPfe?.length || 0}</span>
+                    <span className="text-xs text-ink-tertiary">/{subject.maxGrps || 1}</span>
+                  </div>
+                  <div>
+                    {subject.status === 'propose' && (
+                      <button className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-brand hover:bg-brand/10 transition-colors">
+                        <Pencil className="w-3.5 h-3.5" />
+                        Edit
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-/* ───────────────────────────────────────────────────────────── 
+/* ─────────────────────────────────────────────────────────────
    STUDENT SUBJECT GALLERY
    ───────────────────────────────────────────────────────────── */
 
-function StudentSubjectGallery({ subjects, loading, error, onSelect, selectedSubjectId }) {
-  const validatedSubjects = subjects.filter(s => s.status === 'valide');
+function StudentSubjectGallery({ subjects, loading, error, onSelect, selectedSubjectId, onRetry }) {
+  const validated = (Array.isArray(subjects) ? subjects : []).filter((s) => s.status === 'valide');
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-edge bg-surface p-6 shadow-card">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-brand">
-            Available Topics
-          </p>
-          <h2 className="mt-2 text-xl font-bold tracking-tight text-ink">
-            Subject Gallery
-          </h2>
-          <p className="mt-1 text-sm text-ink-secondary">
-            Browse and select a research topic for your PFE
-          </p>
-        </div>
-      </section>
+    <div className="space-y-4">
+      <SectionHeader
+        eyebrow="Available Topics"
+        title="Subject Gallery"
+        subtitle={`${validated.length} validated topic${validated.length !== 1 ? 's' : ''} ready for selection`}
+      />
 
       {loading ? (
-        <div className="rounded-3xl border border-dashed border-edge bg-surface p-8 text-center text-sm text-ink-secondary">
-          Loading subjects...
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="rounded-2xl border border-edge bg-surface p-5 shadow-card">
+              <div className="space-y-3">
+                <Shimmer className="h-5 w-3/4" />
+                <Shimmer className="h-4 w-full" />
+                <Shimmer className="h-4 w-full" />
+                <Shimmer className="h-4 w-1/2" />
+                <Shimmer className="h-9 w-full rounded-xl mt-2" />
+              </div>
+            </div>
+          ))}
         </div>
       ) : error ? (
-        <div className="rounded-3xl border border-danger/50 bg-danger/50 p-5 text-sm text-danger">
-          {error}
-        </div>
-      ) : validatedSubjects.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-edge bg-surface p-8 text-center text-sm text-ink-secondary">
-          No validated subjects available yet
-        </div>
+        <ErrorBanner error={error} onRetry={onRetry} />
+      ) : validated.length === 0 ? (
+        <EmptyState
+          icon={BookOpen}
+          title="No validated subjects yet"
+          hint="Check back after the administration approves new proposals."
+        />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {validatedSubjects.map((subject) => {
-            const isFull = subject.groupsPfe?.length >= subject.maxGrps;
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {validated.map((subject) => {
+            const isFull = (subject.groupsPfe?.length || 0) >= (subject.maxGrps || 1);
             const isSelected = selectedSubjectId === subject.id;
-
             return (
               <div
                 key={subject.id}
-                className={`rounded-2xl border-2 p-5 transition-all cursor-pointer ${
+                className={`rounded-2xl border-2 p-5 transition-all duration-200 ${
                   isSelected
-                    ? 'border-brand bg-brand/5 shadow-lg'
-                    : 'border-edge bg-surface shadow-card hover:shadow-lg'
+                    ? 'border-brand bg-brand/5 shadow-card-hover'
+                    : isFull
+                    ? 'border-edge bg-surface-200/50 opacity-70'
+                    : 'border-edge bg-surface shadow-card hover:border-brand/40 hover:shadow-card-hover cursor-pointer'
                 }`}
+                onClick={() => !isFull && onSelect(subject.id, !isSelected)}
               >
-                <div>
-                  <h3 className="text-base font-semibold text-ink">
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <h3 className="text-sm font-semibold text-ink leading-snug">
                     {subject.titre_ar || subject.titre_en || `Subject #${subject.id}`}
                   </h3>
-                  <p className="mt-2 text-sm text-ink-secondary">
-                    {subject.description_ar || subject.description_en || '—'}
-                  </p>
-                  <div className="mt-3 flex items-center justify-between">
-                    <div className="text-xs text-ink-tertiary">
-                      <span className="font-medium text-ink">{subject.groupsPfe?.length || 0}</span>
-                      {' '}/ {subject.maxGrps} groups
-                    </div>
-                    <span className="text-xs font-medium text-ink-secondary">
-                      by {getUserDisplayName(subject.enseignant?.user)}
-                    </span>
+                  {isSelected && (
+                    <CheckCircle2 className="w-5 h-5 text-brand flex-shrink-0" />
+                  )}
+                </div>
+                <p className="text-sm text-ink-secondary line-clamp-3 mb-4">
+                  {subject.description_ar || subject.description_en || '—'}
+                </p>
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between text-xs text-ink-tertiary">
+                    <span>by {getUserDisplayName(subject.enseignant?.user)}</span>
+                    {subject.typeProjet && (
+                      <span className="rounded-md bg-surface-200 px-2 py-0.5 capitalize font-medium">
+                        {subject.typeProjet}
+                      </span>
+                    )}
                   </div>
+                  <CapacityBar
+                    used={subject.groupsPfe?.length || 0}
+                    max={subject.maxGrps || 1}
+                  />
                 </div>
                 <button
-                  onClick={() => onSelect(subject.id, !isSelected)}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onSelect(subject.id, !isSelected); }}
                   disabled={isFull && !isSelected}
-                  className={`mt-4 w-full py-2 rounded-lg text-sm font-medium transition-all ${
+                  className={`mt-4 w-full rounded-xl py-2 text-sm font-medium transition-all ${
                     isSelected
-                      ? 'bg-brand text-surface hover:bg-brand-hover'
+                      ? 'bg-brand text-surface hover:opacity-90'
                       : isFull
-                        ? 'bg-surface-200 text-ink-muted cursor-not-allowed'
-                        : 'bg-surface-200 text-ink hover:bg-surface-300'
+                      ? 'bg-surface-300 text-ink-muted cursor-not-allowed'
+                      : 'bg-surface-200 text-ink hover:bg-surface-300'
                   }`}
                 >
-                  {isSelected ? '✓ Selected' : isFull ? 'Full' : 'Select'}
+                  {isSelected ? '✓ Selected' : isFull ? 'Full' : 'Select this topic'}
                 </button>
               </div>
             );
@@ -489,49 +1035,93 @@ function StudentSubjectGallery({ subjects, loading, error, onSelect, selectedSub
   );
 }
 
-function GroupsOverview({ groups, loading, error, isAdmin, isTeacher, isStudent }) {
-  const title = isAdmin ? 'All Groups' : isTeacher ? 'Groups Choosing My Subjects' : 'My Group';
+/* ─────────────────────────────────────────────────────────────
+   GROUPS OVERVIEW
+   ───────────────────────────────────────────────────────────── */
+
+function GroupsOverview({ groups, loading, error, isAdmin, isTeacher, onRetry }) {
+  const list = Array.isArray(groups) ? groups : [];
+  const title = isAdmin ? 'All Groups' : isTeacher ? 'Groups on My Subjects' : 'My Group';
   const subtitle = isAdmin
-    ? 'All PFE groups in the system'
+    ? `${list.length} PFE group${list.length !== 1 ? 's' : ''} in the system`
     : isTeacher
-      ? 'Groups that selected one of your subjects'
-      : 'Your assigned PFE group';
+    ? 'Groups that selected one of your research topics'
+    : 'Your assigned PFE group and members';
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-edge bg-surface p-6 shadow-card">
-        <h2 className="text-xl font-bold tracking-tight text-ink">{title}</h2>
-        <p className="mt-1 text-sm text-ink-secondary">{subtitle}</p>
-      </section>
+    <div className="space-y-4">
+      <SectionHeader eyebrow="PFE Groups" title={title} subtitle={subtitle} />
 
       {loading ? (
-        <div className="rounded-3xl border border-dashed border-edge bg-surface p-8 text-center text-sm text-ink-secondary">
-          Loading groups...
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {[0, 1].map((i) => (
+            <div key={i} className="rounded-2xl border border-edge bg-surface p-5 shadow-card space-y-3">
+              <Shimmer className="h-5 w-2/3" />
+              <Shimmer className="h-4 w-full" />
+              <Shimmer className="h-4 w-3/4" />
+              <div className="flex gap-2 pt-2">
+                {[0, 1, 2].map((j) => <Shimmer key={j} className="h-7 w-7 rounded-full" />)}
+              </div>
+            </div>
+          ))}
         </div>
       ) : error ? (
-        <div className="rounded-3xl border border-danger/50 bg-danger/50 p-5 text-sm text-danger">
-          {error}
-        </div>
-      ) : groups.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-edge bg-surface p-8 text-center text-sm text-ink-secondary">
-          No groups found.
-        </div>
+        <ErrorBanner error={error} onRetry={onRetry} />
+      ) : list.length === 0 ? (
+        <EmptyState icon={Users} title="No groups found" hint="Groups will appear here once formed." />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {groups.map((group) => {
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {list.map((group) => {
             const subject = group.sujetFinal;
+            const memberCount = group.groupMembers?.length || 0;
             return (
-              <div key={group.id} className="rounded-2xl border border-edge bg-surface p-5 shadow-card">
-                <h3 className="text-base font-semibold text-ink">{group.nom_ar || group.nom_en || `Group #${group.id}`}</h3>
-                <p className="mt-2 text-sm text-ink-secondary">
-                  Subject: {subject?.titre_ar || subject?.titre_en || '—'}
-                </p>
-                <p className="mt-1 text-sm text-ink-tertiary">
-                  Teacher: {getUserDisplayName(subject?.enseignant?.user)}
-                </p>
-                <p className="mt-1 text-xs text-ink-tertiary">
-                  Members: {group.groupMembers?.length || 0}
-                </p>
+              <div
+                key={group.id}
+                className="rounded-2xl border border-edge bg-surface p-5 shadow-card hover:shadow-card-hover transition-shadow"
+              >
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink">
+                      {group.nom_ar || group.nom_en || `Group #${group.id}`}
+                    </h3>
+                    <p className="mt-0.5 text-xs text-ink-tertiary">
+                      {memberCount} member{memberCount !== 1 ? 's' : ''}
+                    </p>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
+                    <span className="w-1.5 h-1.5 rounded-full bg-success" />
+                    Active
+                  </span>
+                </div>
+
+                <div className="rounded-xl bg-surface-200/60 px-3 py-2.5 mb-3">
+                  <p className="text-xs font-medium text-ink-secondary mb-0.5">Subject</p>
+                  <p className="text-sm text-ink font-medium truncate">
+                    {subject?.titre_ar || subject?.titre_en || 'No subject assigned'}
+                  </p>
+                  <p className="text-xs text-ink-tertiary mt-0.5">
+                    {getUserDisplayName(subject?.enseignant?.user)}
+                  </p>
+                </div>
+
+                {/* Member avatars */}
+                {memberCount > 0 && (
+                  <div className="flex items-center gap-1">
+                    {(group.groupMembers || []).slice(0, 4).map((m, idx) => (
+                      <div
+                        key={idx}
+                        className="w-7 h-7 rounded-full bg-brand/20 border-2 border-surface flex items-center justify-center text-xs font-semibold text-brand -ml-1 first:ml-0"
+                      >
+                        {(m?.user?.prenom?.[0] || m?.prenom?.[0] || '?').toUpperCase()}
+                      </div>
+                    ))}
+                    {memberCount > 4 && (
+                      <div className="w-7 h-7 rounded-full bg-surface-300 border-2 border-surface flex items-center justify-center text-xs font-semibold text-ink-secondary -ml-1">
+                        +{memberCount - 4}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -541,19 +1131,50 @@ function GroupsOverview({ groups, loading, error, isAdmin, isTeacher, isStudent 
   );
 }
 
-/* ───────────────────────────────────────────────────────────── 
+/* ─────────────────────────────────────────────────────────────
+   DEFENSE PANEL (placeholder)
+   ───────────────────────────────────────────────────────────── */
+
+function DefensePanel() {
+  return (
+    <div className="space-y-4">
+      <SectionHeader
+        eyebrow="Defense Planning"
+        title="Defense Schedule"
+        subtitle="Oral defense sessions and jury assignments"
+      />
+      <EmptyState
+        icon={CalendarDays}
+        title="Defense planning coming soon"
+        hint="This module is under development. Check back in the next release."
+      />
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
    MAIN COMPONENT
    ───────────────────────────────────────────────────────────── */
 
 export default function PFEWorkspacePage() {
-  const { user } = useAuth();
-  const userRoles = user?.roles || [];  // Array of role strings
-  const isAdmin = userRoles.includes('admin');
-  const isTeacher = userRoles.includes('enseignant');
-  const isStudent = userRoles.includes('etudiant');
-  const teacherProfileId = user?.enseignant?.id;
+  const { user, loading: authLoading } = useAuth();
 
-  const availableTabs = isAdmin ? ADMIN_TABS : isTeacher ? TEACHER_TABS : STUDENT_TABS;
+  const { isAdmin, isTeacher, isStudent, teacherProfileId } = useMemo(() => {
+    const roles = Array.isArray(user?.roles) ? user.roles : [];
+    return {
+      isAdmin: roles.includes('admin'),
+      isTeacher: roles.includes('enseignant'),
+      isStudent: roles.includes('etudiant'),
+      teacherProfileId: user?.enseignant?.id ?? null,
+    };
+  }, [user]);
+
+  const availableTabs = useMemo(
+    () => (isAdmin ? ADMIN_TABS : isTeacher ? TEACHER_TABS : STUDENT_TABS),
+    [isAdmin, isTeacher]
+  );
+
+  const role = isAdmin ? 'admin' : isTeacher ? 'enseignant' : 'etudiant';
 
   /* ── State ──────────────────────────────────────────────────── */
   const [activeTab, setActiveTab] = useState('subjects');
@@ -561,91 +1182,97 @@ export default function PFEWorkspacePage() {
   const [groups, setGroups] = useState([]);
   const [configs, setConfigs] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
   const [selectedSubjectId, setSelectedSubjectId] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState('—');
 
-  /* ── Data Fetching ──────────────────────────────────────────– */
+  useEffect(() => {
+    if (!availableTabs.some((t) => t.id === activeTab)) setActiveTab('subjects');
+  }, [availableTabs, activeTab]);
+
+  /* ── Data loaders ───────────────────────────────────────────── */
 
   const loadSubjects = useCallback(async () => {
+    if (authLoading) return;
+    const endpoint = isStudent
+      ? '/api/v1/pfe/sujets?status=valide'
+      : isTeacher && teacherProfileId
+      ? `/api/v1/pfe/sujets?enseignantId=${teacherProfileId}`
+      : '/api/v1/pfe/sujets';
     try {
       setLoading(true);
-      setError('');
-      const endpoint = isStudent
-        ? '/api/v1/pfe/sujets?status=valide'
-        : isTeacher && teacherProfileId
-          ? `/api/v1/pfe/sujets?enseignantId=${teacherProfileId}`
-          : '/api/v1/pfe/sujets';
-      console.log('[PFE] loadSubjects endpoint:', endpoint, 'teacherProfileId:', teacherProfileId);
-      const response = await request(endpoint);
-      const data = Array.isArray(response?.data) ? response.data : [];
-      console.log('[PFE] loaded subjects count:', data.length, 'subjects:', data);
-      setSubjects(data);
+      setError(null);
+      const res = await request(endpoint);
+      setSubjects(Array.isArray(res?.data) ? res.data : []);
+      setLastUpdated(new Date().toLocaleTimeString());
     } catch (err) {
-      console.error('[PFE] loadSubjects error:', err);
-      setError(err?.message || 'Failed to load subjects');
+      setError(normalizeApiError(err));
       setSubjects([]);
     } finally {
       setLoading(false);
     }
-  }, [isStudent, isTeacher, teacherProfileId]);
-  const teacherSubjects = subjects;
+  }, [authLoading, isStudent, isTeacher, teacherProfileId]);
 
   const loadGroups = useCallback(async () => {
+    if (authLoading) return;
     try {
       setLoading(true);
-      setError('');
-      const response = await request('/api/v1/pfe/groupes');
-      const data = Array.isArray(response?.data) ? response.data : [];
-      setGroups(data);
+      setError(null);
+      const res = await request('/api/v1/pfe/groupes');
+      setGroups(Array.isArray(res?.data) ? res.data : []);
+      setLastUpdated(new Date().toLocaleTimeString());
     } catch (err) {
-      setError(err?.message || 'Failed to load groups');
+      setError(normalizeApiError(err));
       setGroups([]);
     } finally {
       setLoading(false);
     }
-  }, []);
-
-  const loadJury = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError('');
-      const response = await request('/api/v1/pfe/jury');
-      // Handle jury data when needed
-    } catch (err) {
-      setError(err?.message || 'Failed to load jury');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  }, [authLoading]);
 
   const loadConfigs = useCallback(async () => {
+    if (authLoading) return;
+    if (!isAdmin) {
+      setConfigs([]);
+      setError({ kind: 'forbidden', message: 'Configuration is only available to administrators.' });
+      return;
+    }
     try {
       setLoading(true);
-      setError('');
-      const response = await request('/api/v1/pfe/config');
-      const data = Array.isArray(response?.data) ? response.data : [];
-      setConfigs(data);
+      setError(null);
+      const res = await request('/api/v1/pfe/config');
+      setConfigs(Array.isArray(res?.data) ? res.data : []);
+      setLastUpdated(new Date().toLocaleTimeString());
     } catch (err) {
-      setError(err?.message || 'Failed to load configurations');
+      setError(normalizeApiError(err));
       setConfigs([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authLoading, isAdmin]);
+
+  const loadJury = useCallback(async () => {
+    if (authLoading) return;
+    try {
+      setLoading(true);
+      setError(null);
+      await request('/api/v1/pfe/jury');
+      setLastUpdated(new Date().toLocaleTimeString());
+    } catch (err) {
+      setError(normalizeApiError(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [authLoading]);
 
   useEffect(() => {
-    if (activeTab === 'subjects') {
-      loadSubjects();
-    } else if (activeTab === 'groups') {
-      loadGroups();
-    } else if (activeTab === 'defense') {
-      loadJury();
-    } else if (activeTab === 'config') {
-      loadConfigs();
-    }
+    setError(null);
+    if (activeTab === 'subjects') loadSubjects();
+    else if (activeTab === 'groups') loadGroups();
+    else if (activeTab === 'defense') loadJury();
+    else if (activeTab === 'config') loadConfigs();
   }, [activeTab, loadSubjects, loadGroups, loadJury, loadConfigs]);
 
-  /* ── Admin Actions ──────────────────────────────────────────– */
+  /* ── Actions ────────────────────────────────────────────────── */
 
   const handleValidate = async (sujetId) => {
     try {
@@ -655,7 +1282,7 @@ export default function PFEWorkspacePage() {
       });
       loadSubjects();
     } catch (err) {
-      alert('Failed to validate subject: ' + err.message);
+      setError(normalizeApiError(err));
     }
   };
 
@@ -667,46 +1294,72 @@ export default function PFEWorkspacePage() {
       });
       loadSubjects();
     } catch (err) {
-      alert('Failed to reject subject: ' + err.message);
+      setError(normalizeApiError(err));
     }
   };
 
-  /* ── Student Actions ────────────────────────────────────────– */
+  const handleSelectSubject = useCallback((sujetId, isSelected) => {
+    setSelectedSubjectId(isSelected ? sujetId : null);
+  }, []);
 
-  const handleSelectSubject = async (sujetId, isSelected) => {
-    if (isSelected) {
-      setSelectedSubjectId(sujetId);
-      // TODO: Call backend API to record student selection
-    } else {
-      setSelectedSubjectId(null);
-      // TODO: Call backend API to remove selection
-    }
-  };
+  const retryActiveTab = useCallback(() => {
+    if (activeTab === 'subjects') loadSubjects();
+    else if (activeTab === 'groups') loadGroups();
+    else if (activeTab === 'defense') loadJury();
+    else if (activeTab === 'config') loadConfigs();
+  }, [activeTab, loadSubjects, loadGroups, loadJury, loadConfigs]);
 
-  /* ── Render: Subjects Tab ───────────────────────────────────– */
+  /* ── Derived stats ──────────────────────────────────────────── */
 
-  const renderSubjectsTab = () => {
-    if (isAdmin) {
-      return (
-        <AdminValidationQueue
-          subjects={subjects}
-          loading={loading}
-          error={error}
-          onValidate={handleValidate}
-          onReject={handleReject}
-        />
-      );
-    } else if (isTeacher) {
-      return (
-        <TeacherSubjectsView
-          subjects={subjects}
-          loading={loading}
-          error={error}
-          onRefresh={loadSubjects}
-          teacherProfileId={teacherProfileId}
-        />
-      );
-    } else {
+  const stats = useMemo(
+    () => ({
+      total: subjects.length,
+      pending: subjects.filter((s) => s.status === 'propose').length,
+      validated: subjects.filter((s) => s.status === 'valide').length,
+      groups: groups.length,
+    }),
+    [subjects, groups]
+  );
+
+  const tabCounts = useMemo(
+    () => ({
+      subjects: subjects.length || undefined,
+      groups: groups.length || undefined,
+      config: configs.length || undefined,
+    }),
+    [subjects, groups, configs]
+  );
+
+  const systemStatus = error?.kind === 'network' ? 'offline' : error ? 'degraded' : 'online';
+
+  /* ── Tab content ────────────────────────────────────────────── */
+
+  const renderCenter = () => {
+    if (authLoading) return <SkeletonList count={3} />;
+
+    if (activeTab === 'subjects') {
+      if (isAdmin)
+        return (
+          <AdminValidationQueue
+            subjects={subjects}
+            loading={loading}
+            error={error}
+            onValidate={handleValidate}
+            onReject={handleReject}
+            onRetry={retryActiveTab}
+          />
+        );
+      if (isTeacher)
+        return (
+          <TeacherSubjectsView
+            subjects={subjects}
+            loading={loading}
+            error={error}
+            onRefresh={loadSubjects}
+            teacherProfileId={teacherProfileId}
+            onRetry={retryActiveTab}
+          />
+        );
       return (
         <StudentSubjectGallery
           subjects={subjects}
@@ -714,75 +1367,104 @@ export default function PFEWorkspacePage() {
           error={error}
           onSelect={handleSelectSubject}
           selectedSubjectId={selectedSubjectId}
+          onRetry={retryActiveTab}
         />
       );
     }
+
+    if (activeTab === 'groups')
+      return (
+        <GroupsOverview
+          groups={groups}
+          loading={loading}
+          error={error}
+          isAdmin={isAdmin}
+          isTeacher={isTeacher}
+          onRetry={retryActiveTab}
+        />
+      );
+
+    if (activeTab === 'defense') return <DefensePanel />;
+
+    if (activeTab === 'config')
+      return (
+        <div className="space-y-4">
+          <SectionHeader
+            eyebrow="System"
+            title="Configuration"
+            subtitle="Manage PFE system parameters and academic year settings"
+          />
+          <PfeConfigView
+            configs={configs}
+            loading={loading}
+            error={error?.message || ''}
+            onRefresh={loadConfigs}
+          />
+        </div>
+      );
+
+    return null;
   };
 
-  /* ── Render: Groups Tab ─────────────────────────────────────– */
-
-  const renderGroupsTab = () => (
-    <GroupsOverview
-      groups={groups}
-      loading={loading}
-      error={error}
-      isAdmin={isAdmin}
-      isTeacher={isTeacher}
-      isStudent={isStudent}
-    />
-  );
-
-  /* ── Render: Defense Tab ────────────────────────────────────– */
-
-  const renderDefenseTab = () => (
-    <div className="rounded-3xl border border-dashed border-edge bg-surface p-8 text-center text-sm text-ink-secondary">
-      Defense planning coming soon...
-    </div>
-  );
-
-  /* ── Render: Config Tab (Admin Only) ─────────────────────────– */
-
-  const renderConfigTab = () => (
-    <PfeConfigView
-      configs={configs}
-      loading={loading}
-      error={error}
-      onRefresh={loadConfigs}
-    />
-  );
-
-  /* ── Main Render ────────────────────────────────────────────– */
+  /* ── Main render ────────────────────────────────────────────── */
 
   return (
-    <div className="space-y-6 max-w-7xl min-w-0">
-      {/* Tab Navigation */}
-      <div className="rounded-3xl border border-edge bg-surface shadow-card overflow-hidden">
-        <div className="flex gap-0 border-b border-edge-subtle bg-surface-200/70">
+    <div className="space-y-5 max-w-[1600px] min-w-0">
+      {/* Header */}
+      <PageHeader role={role} onRefresh={retryActiveTab} loading={loading} />
+
+      {/* Mobile tab bar (visible only on small screens) */}
+      <div className="lg:hidden overflow-x-auto">
+        <div className="flex gap-1 rounded-2xl border border-edge bg-surface p-1.5 shadow-card w-max min-w-full">
           {availableTabs.map((tab) => {
-            const Icon = tab.Icon;
+            const { Icon } = tab;
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-4 text-sm font-medium transition-all duration-200 border-b-2 ${
-                  isActive
-                    ? 'border-b-brand text-brand bg-brand-light'
-                    : 'border-b-transparent text-ink-secondary hover:text-ink hover:bg-surface-200'
+                className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium whitespace-nowrap transition-all duration-200 ${
+                  isActive ? 'bg-brand text-surface shadow-sm' : 'text-ink-secondary hover:text-ink hover:bg-surface-200'
                 }`}
               >
                 <Icon className="w-4 h-4" />
                 {tab.label}
+                {tabCounts[tab.id] && (
+                  <span className={`rounded-full px-1.5 text-[10px] font-bold ${isActive ? 'bg-white/20' : 'bg-surface-300'}`}>
+                    {tabCounts[tab.id]}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
+      </div>
 
-        <div className="p-6">
-          {activeTab === 'subjects' && renderSubjectsTab()}
-          {activeTab === 'groups' && renderGroupsTab()}
-          {activeTab === 'defense' && renderDefenseTab()}
-          {activeTab === 'config' && renderConfigTab()}
+      {/* 3-column grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr_280px] gap-5 items-start">
+        {/* Left nav — hidden on mobile (tabs above take over) */}
+        <div className="hidden lg:block lg:sticky lg:top-5">
+          <LeftNav
+            tabs={availableTabs}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            counts={tabCounts}
+          />
+        </div>
+
+        {/* Center panel */}
+        <main className="min-w-0">{renderCenter()}</main>
+
+        {/* Right panel */}
+        <div className="lg:sticky lg:top-5">
+          <RightPanel
+            stats={stats}
+            systemStatus={systemStatus}
+            lastUpdated={lastUpdated}
+            isAdmin={isAdmin}
+            loading={loading && subjects.length === 0}
+          />
         </div>
       </div>
     </div>

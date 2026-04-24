@@ -1,9 +1,7 @@
 import { Prisma, StatusDocumentRequest } from "@prisma/client";
 import prisma from "../../config/database";
 import logger from "../../utils/logger";
-import {
-  createAlert,
-} from "./alert.service";
+import { createAlert } from "./alert.service";
 
 export { createAlert, getUserAlerts, markAsRead } from "./alert.service";
 
@@ -43,10 +41,54 @@ const resolveDossierEventTargets = async (dossierId: number, client: AlertEventC
   return dossier;
 };
 
+const resolveUserLabel = async (
+  userId: number | null | undefined,
+  client: AlertEventClient
+): Promise<string> => {
+  const normalizedUserId = Number(userId);
+  if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
+    return "Administration";
+  }
+
+  const user = await client.user.findUnique({
+    where: { id: normalizedUserId },
+    select: { nom: true, prenom: true },
+  });
+
+  const fullName = `${normalizeText(user?.prenom)} ${normalizeText(user?.nom)}`.trim();
+  return fullName || "Administration";
+};
+
+export const listAdminUserIds = async (
+  client: AlertEventClient = prisma
+): Promise<number[]> => {
+  const rows = await client.userRole.findMany({
+    where: {
+      role: {
+        nom: {
+          equals: "admin",
+          mode: "insensitive",
+        },
+      },
+    },
+    select: { userId: true },
+    distinct: ["userId"],
+  });
+
+  return rows
+    .map((row) => Number(row.userId))
+    .filter((userId): userId is number => Number.isInteger(userId) && userId > 0);
+};
+
 export const createMeetingScheduledAlert = async (
-  dossierId: number,
+  input: { dossierId: number; adminUserId?: number | null },
   client: AlertEventClient = prisma
 ) => {
+  const dossierId = Number(input.dossierId);
+  if (!Number.isInteger(dossierId) || dossierId <= 0) {
+    throw new Error("A valid dossierId is required");
+  }
+
   const dossier = await resolveDossierEventTargets(dossierId, client);
   const studentUserId = Number(dossier.etudiant?.userId || 0);
 
@@ -56,15 +98,25 @@ export const createMeetingScheduledAlert = async (
   }
 
   const meetingDate = formatDateTime(dossier.conseil?.dateReunion || null);
-  const meetingLocation = normalizeText(dossier.conseil?.lieu) || "Not specified";
-  const details = normalizeText(dossier.conseil?.description_ar || dossier.conseil?.description_en) ||
+  const meetingDescription =
+    normalizeText(dossier.conseil?.description_ar || dossier.conseil?.description_en) ||
     "A disciplinary meeting has been scheduled for your case.";
+  const senderLabel = await resolveUserLabel(input.adminUserId, client);
+
+  console.log("[alerts] trigger meeting", {
+    dossierId,
+    studentUserId,
+    adminUserId: input.adminUserId || null,
+  });
 
   return createAlert(
-    studentUserId,
-    "Disciplinary Meeting Scheduled",
-    `Date: ${meetingDate}\nLocation: ${meetingLocation}\nDetails: ${details}`,
-    "MEETING",
+    {
+      userId: studentUserId,
+      type: "MEETING",
+      title: "Disciplinary Meeting Scheduled",
+      message: `Meeting date: ${meetingDate}\nDescription: ${meetingDescription}\nSender: ${senderLabel}`,
+      relatedId: dossierId,
+    },
     client
   );
 };
@@ -90,10 +142,13 @@ export const createDisciplinaryDecisionAlerts = async (
 
   if (studentUserId > 0) {
     const studentAlert = await createAlert(
-      studentUserId,
-      "Disciplinary Decision",
-      payload,
-      "DECISION",
+      {
+        userId: studentUserId,
+        type: "DECISION",
+        title: "Disciplinary Decision",
+        message: payload,
+        relatedId: dossierId,
+      },
       client
     );
     created.push(studentAlert.id);
@@ -101,10 +156,13 @@ export const createDisciplinaryDecisionAlerts = async (
 
   if (reportingTeacherUserId > 0) {
     const teacherAlert = await createAlert(
-      reportingTeacherUserId,
-      "Disciplinary Decision",
-      payload,
-      "DECISION",
+      {
+        userId: reportingTeacherUserId,
+        type: "DECISION",
+        title: "Disciplinary Decision",
+        message: payload,
+        relatedId: dossierId,
+      },
       client
     );
     created.push(teacherAlert.id);
@@ -153,9 +211,9 @@ export const createDocumentRequestStatusAlert = async (
     return null;
   }
 
-  const teacherUserId = Number(request.enseignant?.userId || 0);
-  if (!teacherUserId) {
-    logger.warn(`Document request alert skipped: teacher user not found for request ${documentRequestId}`);
+  const requesterUserId = Number(request.enseignant?.userId || 0);
+  if (!requesterUserId) {
+    logger.warn(`Document request alert skipped: requester user not found for request ${documentRequestId}`);
     return null;
   }
 
@@ -173,11 +231,20 @@ export const createDocumentRequestStatusAlert = async (
     .filter(Boolean)
     .join("\n");
 
+  console.log("[alerts] trigger document-status", {
+    documentRequestId,
+    requesterUserId,
+    status: request.status,
+  });
+
   return createAlert(
-    teacherUserId,
-    "Document Request Update",
-    message,
-    "REQUEST",
+    {
+      userId: requesterUserId,
+      type: "DOCUMENT",
+      title: "Document Request Update",
+      message,
+      relatedId: request.id,
+    },
     client
   );
 };

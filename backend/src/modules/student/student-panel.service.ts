@@ -9,6 +9,10 @@ import {
 } from "@prisma/client";
 import prisma from "../../config/database";
 import { changePassword } from "../auth/auth.service";
+import {
+  buildStudentStatistics,
+  getStudentPfeInfo,
+} from "../dashboard/statistics.service";
 
 export type StudentPanelAnnouncementStatus = "published" | "scheduled";
 export type StudentPanelReclamationStatus = "pending" | "approved" | "rejected";
@@ -841,6 +845,8 @@ const resolveReclamationContext = async (context: StudentContext, reclamationId:
 };
 
 export const getStudentPanelDashboard = async (userId: number) => {
+  const context = await resolveStudentContext(userId);
+
   const [announcementsResult, reclamationsResult, documentsResult, profile] =
     await Promise.all([
       listStudentPanelAnnouncements(userId, { page: 1, limit: 5 }),
@@ -849,17 +855,20 @@ export const getStudentPanelDashboard = async (userId: number) => {
       getStudentPanelProfile(userId),
     ]);
 
-  const pendingReclamations = reclamationsResult.items.filter(
-    (item) => item.status === "pending"
-  ).length;
+  // Summary numbers come from the centralized statistics service so the
+  // same metric definition is used for students, teachers and admins.
+  const [summary, pfe] = await Promise.all([
+    buildStudentStatistics({
+      etudiantId: context.etudiantId,
+      announcementsVisible: announcementsResult.pagination.total,
+      documentsVisible: documentsResult.pagination.total,
+    }),
+    getStudentPfeInfo(context.etudiantId),
+  ]);
 
   return {
-    summary: {
-      announcements: announcementsResult.pagination.total,
-      reclamations: reclamationsResult.pagination.total,
-      pendingReclamations,
-      documents: documentsResult.pagination.total,
-    },
+    summary,
+    pfe,
     recentAnnouncements: announcementsResult.items,
     recentReclamations: reclamationsResult.items,
     modules: announcementsResult.modules,
@@ -994,6 +1003,7 @@ export const listStudentPanelReclamationTypes = async () => {
   const types = await prisma.reclamationType.findMany({
     select: {
       id: true,
+      code: true,
       nom_ar: true,
       nom_en: true,
       description_ar: true,
@@ -1006,8 +1016,12 @@ export const listStudentPanelReclamationTypes = async () => {
 
   return types.map((type) => ({
     id: type.id,
-    name: type.nom_ar || type.nom_en || null,
-    description: type.description_ar || type.description_en || null,
+    code: type.code,
+    nom_ar: type.nom_ar,
+    nom_en: type.nom_en,
+    nom: type.nom_en || type.nom_ar || "",
+    description_ar: type.description_ar,
+    description_en: type.description_en,
   }));
 };
 
